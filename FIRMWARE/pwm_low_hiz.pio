@@ -1,0 +1,31 @@
+.program pwm_low_hiz
+.wrap_target
+    set pins, 0      ; GPIO出力を0（LOW駆動）
+    set pindirs, 1   ; GPIO方向を出力に設定
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+;    nop
+    set pins, 1      ; GPIO出力を1（HIGH出力）
+    set pindirs, 0   ; GPIO方向を入力に設定（ハイインピーダンス状態）
+    nop
+    nop
+    nop
+    nop
+    nop
+.wrap
+
+% c-sdk {
+static inline void pwm_low_hiz_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_sm_config c = pwm_low_hiz_program_get_default_config(offset);
+    sm_config_set_set_pins(&c, pin, 1);
+    // 分周設定: 3.579545 MHz
+    sm_config_set_clkdiv(&c, 2.7947f);
+//    sm_config_set_clkdiv(&c, 64.0f);
+    pio_sm_init(pio, sm, offset, &c);
+//    pio_sm_set_enabled(pio, sm, true);
+}
+%}
