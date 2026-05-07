@@ -4,8 +4,10 @@
 
 A tool for reading and writing MSX cassettes via USB CDC (virtual COM port). (MSXPLAYer support planned)
 
-![title](./IMAGE/title.jpg)
-��The MSXPLAYer logo is incomplete due to ongoing modifications.
+![title00](./IMAGE/title_fixed000.jpg)
+
+![title01](./IMAGE/title_fixed001.jpg)
+
 
 ## What is this?
 
@@ -46,6 +48,8 @@ Unlike actual machines, the following features are NOT supported:
 - M1 signal support
 
 ## Device Description
+
+![pcb001](./IMAGE/pcb001.jpg)
 
 1. MSX SLOT: Insert MSX-standard cartridges here.
 2. USB-C Port: Connection port to the PC.
@@ -94,7 +98,8 @@ Prices are likely to fluctuate significantly for a while depending on global man
 
 #### Booth
 
-In preparation (planned to start around April)
+<https://ifc.booth.pm/items/8175544>
+
 Completed PCB version: 7,060JPY / Soldering kit version: 6,560JPY
 
 ## Included Items
