@@ -98,6 +98,8 @@ Prices are likely to fluctuate significantly for a while depending on global man
 
 #### Booth
 
+2026/5/10 12:00(JPT) Start
+
 <https://ifc.booth.pm/items/8175544>
 
 Completed PCB version: 7,060JPY / Soldering kit version: 6,560JPY
@@ -155,6 +157,15 @@ Attach rubber feet to 4 locations on the back of the PCB near the screws.
 ![assembly10](./IMAGE/assembly010.jpg)
 
 All assembly work is now complete. Thank you for your effort.
+
+## Operation Check (for Windows)  
+
+Please download the file below, insert the MSX cartridge into this device, and run the program.  
+If it is working correctly, the contents of the cartridge will be displayed starting from address 0x4000, as shown below.  
+
+**Operation Check Program** [MSXPLAYer Game Cassette AdapterOperation Check Program](./SOFTWARE/TestProgram/)  
+
+![Operation Check Screen](./IMAGE/testprg000.png)
 
 ---
 
