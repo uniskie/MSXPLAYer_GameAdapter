@@ -449,6 +449,7 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD maxBank = 0;
     int identicalCount = 0;
     DWORD sramStartBank = 0;
+    BOOL foundPattern = FALSE;
 
     printf("Setting bank 0 (0x6000=0, 0x6800=0, 0x7000=1, 0x7800=1)\n");
     if (!slotWrite(hSerial, 0x6000, 0)) return FALSE;
@@ -489,6 +490,7 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
         {
             printf(" (pattern match - cycle detected)\n");
             maxBank = bankNum - 1;
+            foundPattern = TRUE;
             break;
         }
 
@@ -503,6 +505,7 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
                 printf(" (SRAM detected)\n");
                 maxBank = sramStartBank - 1;
                 romInfo->hasSRAM = TRUE;
+                foundPattern = TRUE;
                 break;
             }
         }
@@ -516,11 +519,10 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
         memcpy(hashA, hashB, sizeof(hashB));
     }
 
-    if (maxBank > 0 || (bankNum >= 256 && maxBank == 0))
+    // ✅ 修正: パターンが見つかった場合のみ TRUE を返す
+    if (foundPattern && maxBank > 0)
     {
         printf("\n=== ASCII 16K Detected ===\n");
-        if (maxBank == 0)
-            maxBank = 255;
         romInfo->mapperType = MAPPER_ASCII_16K;
         romInfo->mapperName = "ASCII 16K";
         romInfo->bankCount = maxBank + 1;
@@ -550,6 +552,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD maxBank = 0;
     int identicalCount = 0;
     DWORD sramStartBank = 0;
+    BOOL foundPattern = FALSE;
 
     printf("Setting bank 0 (0x6000=0, 0x6800=1, 0x7000=2, 0x7800=3)\n");
     if (!slotWrite(hSerial, 0x6000, 0)) return FALSE;
@@ -594,6 +597,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
         {
             printf(" (pattern match - cycle detected)\n");
             maxBank = bankNum - 1;
+            foundPattern = TRUE;
             break;
         }
 
@@ -608,6 +612,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
                 printf(" (SRAM detected)\n");
                 maxBank = sramStartBank - 1;
                 romInfo->hasSRAM = TRUE;
+                foundPattern = TRUE;
                 break;
             }
         }
@@ -621,11 +626,10 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
         memcpy(hashA, hashB, sizeof(hashB));
     }
 
-    if (maxBank > 0 || (bankNum >= 256 && maxBank == 0))
+    // ✅ 修正: パターンが見つかった場合のみ TRUE を返す
+    if (foundPattern && maxBank > 0)
     {
         printf("\n=== ASCII 8K Detected ===\n");
-        if (maxBank == 0)
-            maxBank = 255;
         romInfo->mapperType = MAPPER_ASCII_8K;
         romInfo->mapperName = "ASCII 8K";
         romInfo->bankCount = maxBank + 1;
@@ -655,6 +659,7 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD maxBank = 0;
     int identicalCount = 0;
     DWORD sramStartBank = 0;
+    BOOL foundPattern = FALSE;
 
     printf("Setting bank 0\n");
     if (!slotWrite(hSerial, 0x4000, 0)) return FALSE;
@@ -707,6 +712,7 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
         {
             printf(" (pattern match - cycle detected)\n");
             maxBank = bankNum - 1;
+            foundPattern = TRUE;
             break;
         }
 
@@ -721,6 +727,7 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
                 printf(" (SRAM detected)\n");
                 maxBank = sramStartBank - 1;
                 romInfo->hasSRAM = TRUE;
+                foundPattern = TRUE;
                 break;
             }
         }
@@ -734,7 +741,8 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
         memcpy(hashA, hashB, sizeof(hashB));
     }
 
-    if (maxBank > 0)
+    // ✅ 修正: パターンが見つかった場合のみ TRUE を返す
+    if (foundPattern && maxBank > 0)
     {
         printf("\n=== KONAMI 8K Detected ===\n");
         if (romInfo->hasSRAM)
@@ -766,6 +774,7 @@ static BOOL DetectKONAMI_SCC(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD prevHashA[3];
     DWORD bankNum;
     DWORD maxBank = 0;
+    BOOL foundPattern = FALSE;
 
     printf("Setting bank 0\n");
     if (!slotWrite(hSerial, 0x5000, 0)) return FALSE;
@@ -817,6 +826,7 @@ static BOOL DetectKONAMI_SCC(HANDLE hSerial, ROM_INFO* romInfo)
         {
             printf(" (pattern match - cycle detected)\n");
             maxBank = bankNum - 1;
+            foundPattern = TRUE;
             break;
         }
 
@@ -825,7 +835,8 @@ static BOOL DetectKONAMI_SCC(HANDLE hSerial, ROM_INFO* romInfo)
         memcpy(hashA, hashB, sizeof(hashB));
     }
 
-    if (maxBank > 0)
+    // ✅ 修正: パターンが見つかった場合のみ TRUE を返す
+    if (foundPattern && maxBank > 0)
     {
         printf("\n=== KONAMI SCC Detected ===\n");
         romInfo->mapperType = MAPPER_KONAMI_SCC;
@@ -854,6 +865,7 @@ static BOOL DetectGeneric16K(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD hashA[2], hashB[2];
     DWORD bankNum;
     DWORD maxBank = 0;
+    BOOL foundPattern = FALSE;
 
     printf("Setting bank 0 (0x4000=0, 0x8000=1)\n");
     if (!slotWrite(hSerial, 0x4000, 0)) return FALSE;
@@ -888,6 +900,7 @@ static BOOL DetectGeneric16K(HANDLE hSerial, ROM_INFO* romInfo)
         {
             printf(" (pattern match - cycle detected)\n");
             maxBank = bankNum - 1;
+            foundPattern = TRUE;
             break;
         }
 
@@ -895,11 +908,9 @@ static BOOL DetectGeneric16K(HANDLE hSerial, ROM_INFO* romInfo)
         memcpy(hashA, hashB, sizeof(hashA));
     }
 
-    if (maxBank > 0 || bankNum >= 256)
+    // ✅ 修正: パターンが見つかった場合のみ TRUE を返す
+    if (foundPattern && maxBank > 0)
     {
-        if (bankNum >= 256 && maxBank == 0)
-            maxBank = 255;
-
         printf("\n=== Generic 16K Detected ===\n");
         romInfo->mapperType = MAPPER_GENERIC_16K;
         romInfo->mapperName = "Generic 16K";
@@ -927,6 +938,7 @@ static BOOL DetectGeneric8K(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD hashA[3], hashB[3];
     DWORD bankNum;
     DWORD maxBank = 0;
+    BOOL foundPattern = FALSE;
 
     printf("Setting bank 0 (0x4000=0, 0x6000=1, 0x8000=2, 0xA000=3)\n");
     if (!slotWrite(hSerial, 0x4000, 0)) return FALSE;
@@ -969,6 +981,7 @@ static BOOL DetectGeneric8K(HANDLE hSerial, ROM_INFO* romInfo)
         {
             printf(" (pattern match - cycle detected)\n");
             maxBank = bankNum - 1;
+            foundPattern = TRUE;
             break;
         }
 
@@ -976,11 +989,9 @@ static BOOL DetectGeneric8K(HANDLE hSerial, ROM_INFO* romInfo)
         memcpy(hashA, hashB, sizeof(hashA));
     }
 
-    if (maxBank > 0 || bankNum > 0x3F)
+    // ✅ 修正: パターンが見つかった場合のみ TRUE を返す
+    if (foundPattern && maxBank > 0)
     {
-        if (bankNum > 0x3F && maxBank == 0)
-            maxBank = 0x3F;
-
         printf("\n=== Generic 8K Detected ===\n");
         romInfo->mapperType = MAPPER_GENERIC_8K;
         romInfo->mapperName = "Generic 8K";
@@ -1007,6 +1018,7 @@ static BOOL DetectHAL_NOTE(HANDLE hSerial, ROM_INFO* romInfo)
     BYTE dataBuffer[0x8000];
     DWORD hashA[3], hashB[3];
     DWORD bankNum;
+    BOOL foundPattern = FALSE;
 
     printf("Setting bank 0 (0x4FFF=0, 0x6FFF=1, 0x8FFF=2, 0xAFFF=3)\n");
     if (!slotWrite(hSerial, 0x4FFF, 0)) return FALSE;
@@ -1048,23 +1060,30 @@ static BOOL DetectHAL_NOTE(HANDLE hSerial, ROM_INFO* romInfo)
         if (hashA[0] == hashB[0] && hashA[1] == hashB[1] && hashA[2] == hashB[2])
         {
             printf(" (pattern match - cycle detected)\n");
+            foundPattern = TRUE;
             break;
         }
 
         printf("\n");
-        memcpy(hashA, hashB, sizeof(hashA));
+        memcpy(hashA, hashB, sizeof(hashB));
     }
 
-    printf("\n=== HAL NOTE Detected ===\n");
-    romInfo->mapperType = MAPPER_HAL_NOTE;
-    romInfo->mapperName = "HAL NOTE";
-    romInfo->bankCount = 0x80;
-    romInfo->romSize = romInfo->bankCount * 0x2000;
-    romInfo->readBankSize = 0x2000;
-    romInfo->readAreaStart = 0x8000;
-    romInfo->readAreaSize = 0x2000;
-    printf("Bank count: %lu, ROM size: %lu (0x%lX)\n", romInfo->bankCount, romInfo->romSize, romInfo->romSize);
-    return TRUE;
+    // ✅ 修正: HAL NOTE はループが 0x7F に達したことで検出
+    if (foundPattern || bankNum > 0x7F)
+    {
+        printf("\n=== HAL NOTE Detected ===\n");
+        romInfo->mapperType = MAPPER_HAL_NOTE;
+        romInfo->mapperName = "HAL NOTE";
+        romInfo->bankCount = 0x80;
+        romInfo->romSize = romInfo->bankCount * 0x2000;
+        romInfo->readBankSize = 0x2000;
+        romInfo->readAreaStart = 0x8000;
+        romInfo->readAreaSize = 0x2000;
+        printf("Bank count: %lu, ROM size: %lu (0x%lX)\n", romInfo->bankCount, romInfo->romSize, romInfo->romSize);
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 // ============================================================================
@@ -1685,18 +1704,3 @@ int wmain(int argc, wchar_t* argv[])
     printf("Done.\n");
     return result;
 }
-```
-
-## ✅ 修正内容サマリー
-
-| 項目 | 追加内容 |
-|------|--------|
-| **SlotCheck()** | カセット挿入状態確認（応答に"0010"を含むか確認） |
-| **SlotPowerOn()** | スロット電源ON（応答に"OK"を含むか確認） |
-| **SlotPowerOff()** | スロット電源OFF（応答に"OK"を含むか確認） |
-| **DetectMapper前** | SlotCheck()とSlotPowerOn()を実行 |
-| **Error時** | SlotPowerOff()で安全に終了 |
-| **正常時** | SlotPowerOff()でクリーンアップ |
-| **バナー** | プログラム起動時にタイトル・ビルド日時表示 |
-
-修正完了です。
