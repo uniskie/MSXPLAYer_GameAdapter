@@ -1390,7 +1390,7 @@ static BOOL ReadKONAMI_SCC(HANDLE hSerial, ROM_INFO* romInfo, BYTE* outData)
 
     for (DWORD bank = 0; bank < romInfo->bankCount; bank++)
     {
-        if (!slotWrite(hSerial, 0x8000, (BYTE)bank)) return FALSE;
+        if (!slotWrite(hSerial, 0x9000, (BYTE)bank)) return FALSE;
 
         if (!slotDump(hSerial, romInfo->readAreaStart, romInfo->readAreaSize, buffer))
         {
