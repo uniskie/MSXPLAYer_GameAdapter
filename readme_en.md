@@ -179,7 +179,7 @@ If it is working correctly, the contents of the cartridge will be displayed star
 
 For Windows: (Verified with VC++2019/2026)
 
-- **Simple Read Sample:** [32K ROM Cartridge Read Program](./SOFTWARE/ROM_Dump32K/)
+- **Game Cartridge Dump Sample:** [ROM Cartridge Dump Program](./SOFTWARE/MSXCR_ROMDUMPER/)
 - **Script Engine Sample:** [MSX_SimpleCartridge Write Program](./SOFTWARE/SimpleROM64KWriter/)
   Compatible cartridge: [https://github.com/v9938/MSX_SimpleCartridge](https://github.com/v9938/MSX_SimpleCartridge)
 
