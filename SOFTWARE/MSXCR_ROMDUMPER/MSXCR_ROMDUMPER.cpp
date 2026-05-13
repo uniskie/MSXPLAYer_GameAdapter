@@ -1075,9 +1075,9 @@ static BOOL DetectRType(HANDLE hSerial, ROM_INFO* romInfo)
     hashB[2] = Hash7936(dataBuffer, 0x4000);
     hashB[3] = Hash7936(dataBuffer, 0x6000);
 
-    //#ifdef DISPLAY_HASH
+#ifdef DISPLAY_HASH
     printf("Bank %lu: Hash[0x4000]=%08lX, Hash[0x6000]=%08lX, Hash[0x8000]=%08lX, Hash[0xA000]=%08lX\n", 0x1f, hashB[0], hashB[1], hashB[2], hashB[3]);
-    //#endif
+#endif
 
 
     if ((hashA[0] != hashB[0]) || (hashA[1] != hashB[1]) || (hashA[2] != hashB[2]) || (hashA[3] != hashB[3])) return FALSE;
@@ -1124,7 +1124,7 @@ static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
 {
     BYTE fullDataBuffer[0xC000];
 
-    printf("\n=== Detecting Standard ROM Type ===\n\n");
+    printf("\n=== Detecting Standard ROM Type ===\n");
 
     printf("Reading 0x0000-0xBFFF...\n");
     if (!slotDump(hSerial, 0x0000, 0xC000, fullDataBuffer))
@@ -1496,7 +1496,7 @@ static BOOL ReadRType(HANDLE hSerial, ROM_INFO* romInfo, BYTE* outData)
 
 static BOOL ReadStandardROM(HANDLE hSerial, ROM_INFO* romInfo, BYTE* outData)
 {
-    printf("\n=== Reading Standard ROM ===\n\n");
+    printf("\n=== Reading Standard ROM ===\n");
 
     printf("Reading standard ROM: 0x%04lX - 0x%04lX (%lu bytes)\n",
         romInfo->validDataStart, romInfo->validDataStart + romInfo->validDataSize - 1,
