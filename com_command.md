@@ -408,6 +408,21 @@
 
 ---
 
+[260520_VERにて追加]
+
+### 31) SMTH - Slot → Buffer Transfer Read（一括Read）+ HASH
+
+- **機能**: スロットからバッファーへ連続読み出し+ 32bit HASHコードを計算します。  
+- **書式**: `SMTH,[Address](,[Length],[BufferAddress],[Slot])`
+- **引数**:
+  - `Address` : 0000〜FFFF　スロット側開始アドレス
+  - `Length` :  0000〜FFFF　読み込み長（省略時最大）
+  - `BufferAddress` :  0000〜FFFF　バッファー格納開始位置（省略時0）
+  - `Slot` : 1 or 2（省略時defaultSlot）
+- **応答**: `<Length> : <HASH 32bit>`+`OK/FAIL`
+
+---
+
 ## シリアルコマンド例
 
 ### 例1: スロットの0x0000〜0x3FFFを読み出してPCへ送信
@@ -460,6 +475,7 @@ SPOFF
 |0x08|OR|LastData [OR] DATAを計算します、結果が0x00なら次の命令をスキップします。|
 |0x09|XOR|lastData [XOR] DATAを計算します、結果が0x00なら次の命令をスキップします。|
 |0x0A|JMP|DATAの値だけ命令をスキップします。（0x00-7F=先命令/0x80-FF=前命令）|
+|0x0B|PUSH|lastDataをaddressで指定した位置のBufferメモリに書き出します |
 |0xFE|Abort|スクリプト実行を失敗で終了|
 |0xFF|End|スクリプト実行を成功で終了|
 

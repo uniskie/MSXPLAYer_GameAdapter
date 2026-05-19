@@ -180,6 +180,7 @@ If it is working correctly, the contents of the cartridge will be displayed star
 For Windows: (Verified with VC++2019/2026)
 
 - **Game Cartridge Dump Sample:** [ROM Cartridge Dump Program](./SOFTWARE/MSXCR_ROMDUMPER/)
+- **Game Cartridge Dump Sample (FW:260520 upper):**  [ROM Cartridge Dump Program](./SOFTWARE/MSXCR_ROMDUMPER_FW260519/)
 - **Script Engine Sample:** [MSX_SimpleCartridge Write Program](./SOFTWARE/SimpleROM64KWriter/)
   Compatible cartridge: [https://github.com/v9938/MSX_SimpleCartridge](https://github.com/v9938/MSX_SimpleCartridge)
 

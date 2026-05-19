@@ -408,6 +408,19 @@
 
 ---
 
+### 17) SMTH - Slot → Buffer Transfer Read (Bulk Read) with HASH
+
+- **Function**: Continuous read from slot to buffer + 32bit Hash
+- **Format**: `SMTR,[Address](,[Length],[BufferAddress],[Slot])`
+- **Arguments**:
+  - `Address` : 0000〜FFFF　Slot-side start address
+  - `Length` :  0000〜FFFF　Read length (maximum if omitted)
+  - `BufferAddress` :  0000〜FFFF　Buffer storage start position (0 if omitted)
+  - `Slot` : 1 or 2 (uses defaultSlot if omitted)
+- **Response**: `<Length> : <HASH 32bit>`+`OK/FAIL`
+
+---
+
 ## Serial Command Examples
 
 ### Example 1: Read slot 0x0000〜0x3FFF and send to PC
@@ -460,6 +473,7 @@ by using scripts placed in the buffer.
 |0x08|OR|Calculates LastData [OR] DATA. If result is 0x00, skips next instruction|
 |0x09|XOR|Calculates LastData [XOR] DATA. If result is 0x00, skips next instruction|
 |0x0A|JMP|Skips instructions by the amount of DATA (0x00-7F=forward/0x80-FF=backward)|
+|0x0B|PUSH|Writes lastData to the Buffer memory location specified by the address|
 |0xFE|Abort|Terminates script execution with failure|
 |0xFF|End|Terminates script execution with success|
 

@@ -23,6 +23,7 @@
 //                      CDCのENDPOINTのバッファーサイズを1024>64に変更
 //  26/04/14 V1.11      POWER OFF時の電源安定待ち時間を1ms>100msに変更
 //  26/04/18 V1.12      LSCRを追加、スクリプトのLoop回数を外部から設定可能にした。（出荷FW)
+//  26/05/20 V1.20      SMTHコマンドの追加、スクリプトのPUSH命令を追加
 //
 ////////////////////////////////////////////////////////////////////////
 
@@ -982,6 +983,7 @@ void gpio_callback(uint gpio, uint32_t events) {
  *  0x08: OR         - lastData | dataを計算→Zeroなら次の命令をスキップ
  *  0x09: XOR        - lastData ^ dataを計算→Zeroなら次の命令をスキップ
  *  0x0A: JMP        - data値だけ命令をスキップ（0x00-7F=先/0x80-FF=前）
+ *  0x0B: PUSH       - lastDataをBufferのaddressに指定された場所に書き込みます。
  *  0xFE: Abort      - スクリプト実行を失敗で終了
  *  0xFF: End        - スクリプト実行を成功で終了
  */
@@ -1151,7 +1153,13 @@ int executeCommands(uint8_t *slotMem, size_t bufSize, uint16_t startAddress,uint
                 }
                 i -= 4;  // ループ終了時の i += 4 と相殺
                 break;
-                
+
+            case 0x0B:  // PUSH
+                if (comdbgFlag) printf("%d: PUSH  %x=%x\n",i,address,execState.lastData);
+                slotMem[address] = execState.lastData;
+
+                break;
+
             case 0xFE:  // Abort Script(Fail)
                 if (comdbgFlag) printf("Abort Script(Fail)\n");
                 passCount = execState.instructionPC;
@@ -1722,6 +1730,53 @@ int cmd_err_displayOn(const Command_t* cmd) {
     errCount = 0;
     return CMD_OK;
 }
+
+// Slot Mem Read make Hash     	SMTH	cmd_slotReadTransfer	SMTR,[Address](,[Length],[Buffer Address],[Slot])	戻値: なし                    	SlotからBufferへ一括Readします
+int cmd_slotReadTransferWithHash(const Command_t* cmd) {
+    int bufAddress;
+    uint16_t slotAddress;
+    int length;
+    int i;
+    uint8_t slot;
+    uint8_t data;
+    int hash = 0x5381;
+
+    // パラメータ
+    if (!z80AddressVaild(cmd->arg_val[0]))  {
+        return CMD_FAIL;
+    }
+    slotAddress = (uint16_t)cmd->arg_val[0]; // スロット側の開始アドレス
+
+    if (cmd->arg_val[1] == -1)  length = DATABUF_SIZE; // length デフォルト
+    else                        length = cmd->arg_val[1];
+
+    if (cmd->arg_val[2] == -1)  bufAddress = 0;        // バッファ先頭デフォルト
+    else                        bufAddress = cmd->arg_val[2];
+
+    if (cmd->arg_val[2] >= DATABUF_SIZE) {
+        return CMD_FAIL;
+    }
+    if (bufAddress + length >= DATABUF_SIZE)  length = DATABUF_SIZE - bufAddress; // 範囲補正
+
+    slot = slotVaild(cmd->arg_val[3]);                    // スロット判定
+    if (slot == 0) {
+        return CMD_FAIL;
+    }
+    
+    for (i = bufAddress ; i < (bufAddress + length) ; i++){
+        if (slotReadData(slot, slotAddress, &data) != CMD_OK) { // 1バイト読んで
+            return CMD_FAIL;
+        }
+//        if (i==0) printf ("SM0:%02x %d,%04X",data,slot,slotAddress);    //debugd
+//        if (i==1) printf ("SM1:%02x %d,%04X",data,slot,slotAddress);    //debugd
+        slotMem[i] = data;                     // バッファへ格納
+        hash = ((hash << 5) + hash) ^ data;
+        slotAddress++;                         // スロット側アドレスインクリメント
+    }
+    cdc_printf("%04x : %08x\n",length,hash);   // データサイズとHash値出力
+    return CMD_OK;
+}
+
 
 
 void ledColorInit(void){

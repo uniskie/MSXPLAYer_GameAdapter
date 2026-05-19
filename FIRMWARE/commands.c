@@ -69,6 +69,7 @@ extern int cmd_bufScript(const Command_t* cmd);         // main.c 実装
 extern int cmd_loopScript(const Command_t* cmd);         // main.c 実装
 extern int cmd_readerFactoryTest(const Command_t* cmd);         // main.c 実装
 extern int cmd_setdebuglog(const Command_t* cmd);         // main.c 実装
+extern int cmd_slotReadTransferWithHash(const Command_t* cmd);         // main.c 実装
 
 const CommandTableEntry cmd_table[] = {
     {"HSET", null_format},		    // HSET,[Address],[Data]		                        Hardware Setting,
@@ -102,7 +103,8 @@ const CommandTableEntry cmd_table[] = {
     {"LSCR", cmd_loopScript},		    // LSCR,[Count]	                                        ScriptをJpLoop回数を設定します。
     {"BDMP", cmd_bufDump},		        // BDMP,[Buffer Address]		                        Bufferのデータ内容の表示(DEBUG用)
     {"SDMP", cmd_slotDump},		        // SDMP,[Buffer Address]		                        Bufferのデータ内容の表示(DEBUG用)
-    {"SDBGON", cmd_setdebuglog}		    // SDBGON                   	                        シリアルのデバッグ出力を有効にする
+    {"SDBGON", cmd_setdebuglog},	    // SDBGON                   	                        シリアルのデバッグ出力を有効にする
+    {"SMTH", cmd_slotReadTransferWithHash}	    // SMTH,[Address],[Buffer Address],[Length](,[Slot])    当該エリアをReadしてHash値を計算し返します
 };
 
 const size_t cmd_table_size = sizeof(cmd_table) / sizeof(CommandTableEntry); // テーブルサイズ計算
