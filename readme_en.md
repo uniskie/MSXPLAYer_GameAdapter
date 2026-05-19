@@ -184,6 +184,12 @@ For Windows: (Verified with VC++2019/2026)
 - **Script Engine Sample:** [MSX_SimpleCartridge Write Program](./SOFTWARE/SimpleROM64KWriter/)
   Compatible cartridge: [https://github.com/v9938/MSX_SimpleCartridge](https://github.com/v9938/MSX_SimpleCartridge)
 
+### Other Programs
+
+- **Lithelia-san  MSX-PLAYer-GCA-Reader:**  [https://github.com/Lithelia/MSX-PLAYer-GCA-Reader](https://github.com/Lithelia/MSX-PLAYer-GCA-Reader)  
+- **madscient-san mgadump:**  [https://github.com/madscient/mgadump](https://github.com/madscient/mgadump)  
+- **t-bucchi-san  MSXPLAYer Game Cartidge Adapter GUI:**  [https://github.com/t-bucchi/msx-cartrigde-adapter-gui](https://github.com/t-bucchi/msx-cartrigde-adapter-gui)  
+
 ## Firmware
 
 Compiled firmware is available in the following folder:

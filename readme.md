@@ -182,7 +182,9 @@ Windows向け：(VC++2019/2026で動作確認済)
 
 ### その他プログラム  
 
-- **Litheliaさん作成 MSX-PLAYer-GCA-Reader:**  [https://github.com/Lithelia/MSX-PLAYer-GCA-Reader](https://github.com/Lithelia/MSX-PLAYer-GCA-Reader)
+- **Litheliaさん作成 MSX-PLAYer-GCA-Reader:**  [https://github.com/Lithelia/MSX-PLAYer-GCA-Reader](https://github.com/Lithelia/MSX-PLAYer-GCA-Reader)  
+- **madscientさん作成 mgadump:**  [https://github.com/madscient/mgadump](https://github.com/madscient/mgadump)  
+- **t-bucchiさん作成 MSXPLAYer Game Cartidge Adapter GUI:**  [https://github.com/t-bucchi/msx-cartrigde-adapter-gui](https://github.com/t-bucchi/msx-cartrigde-adapter-gui)  
 
 ## ファームウェアについて
 
