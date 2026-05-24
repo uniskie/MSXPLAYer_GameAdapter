@@ -24,6 +24,8 @@
 //  26/04/14 V1.11      POWER OFF時の電源安定待ち時間を1ms>100msに変更
 //  26/04/18 V1.12      LSCRを追加、スクリプトのLoop回数を外部から設定可能にした。（出荷FW)
 //  26/05/20 V1.20      SMTHコマンドの追加、スクリプトのPUSH命令を追加
+//  26/05/20 V1.21      MSX初期のROMカセットではアクセス速度が<180ns以上ものが散見されたので
+//                      読み込みタイミングを調整した
 //
 ////////////////////////////////////////////////////////////////////////
 
@@ -132,6 +134,20 @@ uint16_t cmpLoopMax = CMP_LOOP;
 #define LED_PIN      25
 #define shortpause(a){systick_hw->cvr=0;while(systick_hw->cvr>a){};} // systick を使った短待ち
 
+//HSET定義
+#define HSET_ADDRESS_MEMWAIT 0
+#define HSET_DEFNUM_MEMWAIT 0                     // MEMWAIT初期値(0ns)
+
+#define HSET_ADDRESS_RDWAIT 1                     
+#define HSET_DEFNUM_RDWAIT 100                   // MEM Read時のRD信号幅 初期値(1000ns)
+
+#define HSET_ADDRESS_WRWAIT 2
+#define HSET_DEFNUM_WRWAIT 18                    // MEM Read時のWr信号幅 初期値(180ns)
+
+#define HSET_ADDRESS_P6MODE 3
+#define HSET_DEFNUM_P6MODE false                // PC6001 modeの 初期値(無効)
+
+
 uint8_t slotMem[DATABUF_SIZE];                    // ワークバッファ (64KB) // スロットデータ保存領域
 uint8_t defaultSlot = 1;                          // デフォルトスロット番号 // SSEL 未指定時使用
 bool displayFlag = true;                          // 結果出力フラグ // true: OK/FAIL を表示
@@ -142,6 +158,10 @@ bool sltPower = false;                            // スロット電源状態フ
 bool sltAcc = false;                              // スロットアクセス中フラグ // true = アクセス中
 bool crlfFlag = false;                            // CR/LF 判定フラグ (BRCV 用)
 bool comdbgFlag = false;                          // CMD実行LOGフラグ
+int wrWait = HSET_DEFNUM_WRWAIT;                  // Memory Write時のwr信号Low時間(n x 10ns)
+int rdWait = HSET_DEFNUM_RDWAIT;                  // Memory Read時のrd信号Low時間(n x 10ns)
+int memWait = HSET_DEFNUM_MEMWAIT;                // Memory R/W時のアクセスのWait時間(n x 10ns)
+bool p6_16kbMode = false;                         // PC6001 mode
 
 uint slice_num;
 
@@ -489,7 +509,24 @@ int slotReadData(uint8_t slot, uint16_t address, uint8_t *data) {
     gpiohi_put_masked(mrq_mask, 0x0);               // MRQ LOW (アサート)
     gpioc_hi_oe_clr(data_mask);                     // データピンを入力に設定 (OE クリア)
 
-    gpiohi_put_masked(rd_mask, 0x0);                // RD LOW (アサート)
+    #ifdef PCBVER_B2 
+    // Rev B2-
+        slot_mask       = ((uint32_t) 0x3f      << 24); // スロット選択マスク
+        slot_data       = ((uint32_t) 0x3f      << 24); // デフォルト値
+
+        if (slot == 1) {
+            if(p6_16kbMode){
+                if ((address >= 0x6000) && (address < 0x8000))      slot_data = ((uint32_t) 0x37 << 24); // スロット1のバンク切替
+                else slot_data = ((uint32_t) 0x3e << 24);
+
+            }else{
+                if ((address >= 0x4000) && (address < 0x8000))      slot_data = ((uint32_t) 0x38 << 24); // スロット1のバンク切替
+                else if ((address >= 0x8000) && (address < 0xC000)) slot_data = ((uint32_t) 0x34 << 24);
+                else slot_data = ((uint32_t) 0x3e << 24);
+            }
+        } 
+    #endif
+
 
 
     #ifdef PCBVER_B 
@@ -507,30 +544,28 @@ int slotReadData(uint8_t slot, uint16_t address, uint8_t *data) {
             else slot_data = ((uint32_t) 0x37 << 25);
         }
     #endif 
-
-    #ifdef PCBVER_B2 
-    // Rev B2-
-        slot_mask       = ((uint32_t) 0x3f      << 24); // スロット選択マスク
-        slot_data       = ((uint32_t) 0x3f      << 24); // デフォルト値
-
-        if (slot == 1) {
-            if ((address >= 0x4000) && (address < 0x8000))      slot_data = ((uint32_t) 0x38 << 24); // スロット1のバンク切替
-            else if ((address >= 0x8000) && (address < 0xC000)) slot_data = ((uint32_t) 0x34 << 24);
-            else slot_data = ((uint32_t) 0x3e << 24);
-        } 
-    #endif
-
     gpiolo_put_masked(slot_mask, slot_data);          // スロット選択値を出力
-    busy_wait_at_least_cycles(72);                  // タイミング確保 (約561ns)
+    gpiohi_put_masked(rd_mask, 0x0);                // RD LOW (アサート)
+
+
+//    busy_wait_at_least_cycles(72);                  // タイミング確保 (720ns)
+    busy_wait_at_least_cycles(rdWait);                  // タイミング確保 (1000ns)
     uint32_t gpio_hi = gpioc_hi_in_get();           // 高位 GPIO の入力を取得
     gpiohi_put_masked(rd_mask, rd_mask);            // RD を解除 (HIGH)
-    gpiolo_put_masked(slot_mask, slot_mask);          // スロット選択を解除 (トライ状態に戻す)
+
+//  gpiolo_put_masked(slot_mask, slot_mask);          // スロット選択を解除 (トライ状態に戻す)
+//  SLOTにDATAのHOLD確保のためコンデンサーが付いている機種があるその対策でPush pull時間を延ばす
+    gpioc_lo_out_xor((gpioc_lo_out_get() ^ slot_mask) & slot_mask); // 現在値と XOR → マスク適用で出力変更
     gpiohi_put_masked(mrq_mask, mrq_mask);          // MRQ を解除 (HIGH)
 
     uint8_t d = 0;
     d = (uint8_t)((gpio_hi >> 8) & 0xff);           // 取得した GPIO の該当ビットを抽出
     *data = d;                                      // 呼び出し側へ返す
+//    busy_wait_at_least_cycles(10);                  // タイミング確保 (約561ns)
     
+    gpioc_lo_oe_xor((gpioc_lo_oe_get() ^ (~slot_mask)) & slot_mask); // 現在値と XOR → マスク適用で出力変更
+    busy_wait_at_least_cycles(memWait);             // waitタイミング確保
+
     sltAcc = false;                                 // アクセス終了フラグクリア
     return CMD_OK;
 }
@@ -588,19 +623,25 @@ int slotWriteData(uint8_t slot, uint16_t address, uint8_t data) {
         slot_data       = ((uint32_t) 0x3f      << 24); // デフォルト値
 
         if (slot == 1) {
-            slot_data = ((uint32_t) 0x3e << 24);       // スロット1 の設定
+            if(p6_16kbMode){
+                if ((address >= 0x6000) && (address < 0x8000))      slot_data = ((uint32_t) 0x37 << 24); // スロット1のバンク切替
+                else slot_data = ((uint32_t) 0x3e << 24);
+            }else{
+                slot_data = ((uint32_t) 0x3e << 24);       // スロット1 の設定
+            }
         }
     #endif
 
     gpiolo_put_masked(slot_mask, slot_data);          // スロット選択値を出力
-    busy_wait_at_least_cycles(36);                  // タイミング確保 (約280ns)
+    busy_wait_at_least_cycles(36);                  // タイミング確保 (360ns)
 
     gpiohi_put_masked(wr_mask, 0x0);                // WR LOW (アサート)
-    busy_wait_at_least_cycles(18);                  // タイミング確保 (約140ns)
+    busy_wait_at_least_cycles(wrWait);                  // タイミング確保 (180ns)
     gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGH (リリース)
     gpiolo_put_masked(slot_mask, slot_mask);          // スロット選択解除
     gpiohi_put_masked(mrq_mask, mrq_mask);          // MRQ HIGH (リリース)
     gpioc_hi_oe_clr(data_mask);                     // データピンを入力に戻す
+    busy_wait_at_least_cycles(memWait);             // waitタイミング確保
 
     sltAcc = false;                                 // アクセス終了フラグクリア
     return CMD_OK;
@@ -1270,12 +1311,47 @@ int cmd_hwInfomation(const Command_t* cmd) {
    cdc_printf("LFCR,%d\n",crlfFlag);               // CRLF フラグ出力
    cdc_printf("COMDBG,%d\n",comdbgFlag);           // シリアルポートに対するデバッグ出力フラグ
    cdc_printf("SCRLOOP,%d\n",cmpLoopMax);          // スクリプトのLOOP回数
+   cdc_printf("MEMWAIT,%d\n",memWait);          // Memory アクセスWait CMDtoCMD
+   cdc_printf("RDWAIT,%d\n",rdWait);          // Memory アクセスWait Read
+   cdc_printf("WRWAIT,%d\n",wrWait);          // Memory アクセスWait Write
+   cdc_printf("P6MODDE,%d\n",p6_16kbMode);          // PC6001 mode flag
    return CMD_OK;
 }
 
 int null_format(const Command_t* cmd) {
     cdc_printf("NULL [%s] [%s] [%x][%x][%x][%x]\n", cmd->cmd,cmd->arg, cmd->arg_val[0],cmd->arg_val[1],cmd->arg_val[2],cmd->arg_val[3]); // デバッグ出力
     return 0;
+}
+
+int cmd_hset(const Command_t* cmd) {
+
+    switch (cmd->arg_val[0]){
+        case HSET_ADDRESS_MEMWAIT:
+            if (cmd->arg_val[1] == -1) memWait = HSET_DEFNUM_MEMWAIT;
+            else memWait = cmd->arg_val[1];
+            return CMD_OK;
+            break;
+
+        case HSET_ADDRESS_RDWAIT:
+            if (cmd->arg_val[1] == -1) rdWait = HSET_DEFNUM_RDWAIT;
+            else rdWait = cmd->arg_val[1];
+            return CMD_OK;
+            break;
+
+        case HSET_ADDRESS_WRWAIT:
+            if (cmd->arg_val[1] == -1) wrWait = HSET_DEFNUM_WRWAIT;
+            else wrWait = cmd->arg_val[1];
+            return CMD_OK;
+            break;
+
+        case HSET_ADDRESS_P6MODE:
+            if (cmd->arg_val[1] == -1) p6_16kbMode = HSET_DEFNUM_P6MODE;
+            else if (cmd->arg_val[1] >= 1) p6_16kbMode = true;
+            else p6_16kbMode = false;
+            return CMD_OK;
+            break;
+    }
+    return CMD_FAIL;
 }
 
 // HW Status                   	HSTS	cmd_hwIntenalStatus 	HSTS                                            	戻値: 内部STATUS  + OK        	SlotのCMD実行状態を表示

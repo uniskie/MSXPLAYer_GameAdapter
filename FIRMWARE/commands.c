@@ -70,9 +70,10 @@ extern int cmd_loopScript(const Command_t* cmd);         // main.c 実装
 extern int cmd_readerFactoryTest(const Command_t* cmd);         // main.c 実装
 extern int cmd_setdebuglog(const Command_t* cmd);         // main.c 実装
 extern int cmd_slotReadTransferWithHash(const Command_t* cmd);         // main.c 実装
+extern int cmd_hset(const Command_t* cmd);         // main.c 実装
 
 const CommandTableEntry cmd_table[] = {
-    {"HSET", null_format},		    // HSET,[Address],[Data]		                        Hardware Setting,
+    {"HSET", cmd_hset},		    // HSET,[Address],[Data]		                        Hardware Setting,
     {"ERROFF", cmd_err_displayOff},		        // DISPON　CMD後のOK表示無し
     {"ERRON", cmd_err_displayOn},		        // DISPON　CMD後のOK表示あり
     {"BCLR", cmd_bufClear},		        // BCLR, [Buffer Address],[Length],[Data]		        Buffer RAMのClear,
