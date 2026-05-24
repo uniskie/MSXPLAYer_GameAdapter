@@ -882,37 +882,53 @@ static DWORD Hash7936(const BYTE* data, DWORD address)
 static BOOL ReadHash5Match(HANDLE hSerial)
 {
     DWORD h[5];
+    DWORD addr;
     int i;
+    int retry;
 
-    for (i = 0; i < 5; i++)
+    for (retry = 0; retry < 2; retry++)
     {
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &h[i]))
+        addr = (retry == 0) ? 0x4000 : 0x8000;
+
+        for (i = 0; i < 5; i++)
         {
-            printf("slotReadHash failed at try %d\n", i + 1);
-            return FALSE;
+            if (!slotReadHash(hSerial, addr, 0x1f00, &h[i]))
+            {
+                printf("slotReadHash failed at try %d\n", i + 1);
+                return FALSE;
         }
     }
+
 #ifdef DISPLAY_HASH
-    printf("Hash = %08lX, %08lX, %08lX, %08lX, %08lX\n",h[0], h[1], h[2], h[3], h[4]);
-
+        printf("Hash(addr=%04lX) = %08lX, %08lX, %08lX, %08lX, %08lX\n",
+            addr, h[0], h[1], h[2], h[3], h[4]);
 #endif
-    // 5回すべて一致しているか
-    if (!(h[0] == h[1] && h[0] == h[2] && h[0] == h[3] && h[0] == h[4]))
-    {
-        printf("Hash mismatch\n");
-        return FALSE;
-    }
 
-    // 全部 0x6DD86381 の場合は無効
-    if (h[0] == 0x6DD86381)
-    {
-//        printf("Hash matched but invalid pattern (all 0x6DD86381)\n");
-        return FALSE;
-    }
+        // 5回すべて一致しているか
+        if (!(h[0] == h[1] && h[0] == h[2] && h[0] == h[3] && h[0] == h[4]))
+        {
+            printf("Hash mismatch\n");
+            return FALSE;
+        }
 
-//    printf("Hash matched: %08lX\n", h[0]);
-    return TRUE;
+        // 0x4000 で全て 0x6DD86381 の場合のみ、0x8000 で再試行
+        if (h[0] == 0x6DD86381)
+        {
+            if (retry == 0)
+            {
+                continue;
+            }
+
+            // 0x8000 側でも無効値だった
+            return FALSE;
+        }
+
+        return TRUE;
 }
+
+    return FALSE;
+}
+
 // address 0 を 100(1us) ずつ 3000(30us) まで変更しながら hash 一致を確認
 static BOOL SweepAddress0AndCheck(HANDLE hSerial)
 {
