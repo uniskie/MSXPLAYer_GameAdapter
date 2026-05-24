@@ -18,15 +18,32 @@
 
 ## コマンド一覧（仕様書形式・実装準拠）
 
-### 1) HSET - Hardware Setting（ダミー/未実装）
+### 1) HSET - Hardware Setting
 
-- **機能**: ハード設定（現状はダミー）
+- **機能**: ハードウェアアクセス時の待ち時間や互換モードを設定する
 - **書式**: `HSET,[Address],[Data]`
 - **引数**:
-  - `Address` : 設定対象アドレス（16進）
-  - `Data` : 設定値（16進）
-- **応答**: `OK`
-- **備考**: 現状は実動作なし。将来拡張用。
+  - `Address` : 設定項目番号（16進）
+  - `Data` : 設定値（16進、省略時は初期値に戻す）
+- **応答**: `OK` / `FAIL`
+- **備考**:
+  - 現在のファームでは下記設定に対応しています。
+
+| Address | 設定項目 | 内容 | 初期値 |
+|---|---|---|---|
+| `0` | `MEMWAIT` | Memory Read/Write後のWait時間 (`n x 10ns`) | `0` |
+| `1` | `RDWAIT` | Memory Read時の/RD信号幅 (`n x 10ns`) | `100` |
+| `2` | `WRWAIT` | Memory Write時の/WR信号幅 (`n x 10ns`) | `18` |
+| `3` | `P6MODE` | PC-6001 16KB mode設定 (`0`:OFF / `1`以上:ON) | `0` |
+
+- **設定例**:
+  - `HSET,1,64` : RDWAIT を `1000ns=1us` に設定
+  - `HSET,1` : RDWAIT を初期値に戻す
+
+- **補足**:
+  - 設定値は `HINF` コマンドで確認できます。
+  - `HINF` の出力には `MEMWAIT` / `RDWAIT` / `WRWAIT` / `P6MODDE` が表示されます。
+  - 未対応の `Address` を指定した場合は `FAIL` になります。
 
 ---
 

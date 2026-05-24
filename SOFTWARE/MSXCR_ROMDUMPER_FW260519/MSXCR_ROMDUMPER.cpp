@@ -2343,6 +2343,245 @@ bool CalcFileSHA1Hex(const wchar_t* filePath, std::string& outSha1)
     return ok;
 }
 
+struct ROM_DB_INFO_EX
+{
+    bool found;
+    std::string title;
+    std::string company;
+    std::string year;
+    std::string status;
+    std::string remark;
+};
+
+bool FindXMLAttributeValue(const std::string& text, const std::string& key, std::string& value)
+{
+    std::string pattern = key + "=\"";
+    size_t pos = text.find(pattern);
+    if (pos == std::string::npos)
+        return false;
+
+    pos += pattern.length();
+    size_t end = text.find("\"", pos);
+    if (end == std::string::npos)
+        return false;
+
+    value = text.substr(pos, end - pos);
+    return true;
+}
+
+bool LoadTextFileUTF8(const std::wstring& filePath, std::string& outText)
+{
+    outText.clear();
+
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    LARGE_INTEGER fileSize = {};
+    if (!GetFileSizeEx(hFile, &fileSize))
+    {
+        CloseHandle(hFile);
+        return false;
+    }
+
+    if (fileSize.QuadPart <= 0 || fileSize.QuadPart > 0x7fffffff)
+    {
+        CloseHandle(hFile);
+        return false;
+    }
+
+    DWORD size = (DWORD)fileSize.QuadPart;
+    char* buffer = (char*)malloc(size + 1);
+    if (!buffer)
+    {
+        CloseHandle(hFile);
+        return false;
+    }
+
+    DWORD totalRead = 0;
+    bool ok = true;
+
+    while (totalRead < size)
+    {
+        DWORD bytesRead = 0;
+        DWORD toRead = size - totalRead;
+        if (!ReadFile(hFile, buffer + totalRead, toRead, &bytesRead, NULL))
+        {
+            ok = false;
+            break;
+        }
+        if (bytesRead == 0)
+        {
+            ok = false;
+            break;
+        }
+        totalRead += bytesRead;
+    }
+
+    CloseHandle(hFile);
+
+    if (!ok || totalRead != size)
+    {
+        free(buffer);
+        return false;
+    }
+
+    buffer[size] = '\0';
+    outText.assign(buffer, size);
+    free(buffer);
+    return true;
+}
+
+bool FindROMInfoBySha1FromSoftwareDB(const std::wstring& xmlPath, const std::string& sha1, ROM_DB_INFO_EX* dbInfo)
+{
+    if (!dbInfo)
+        return false;
+
+    dbInfo->found = false;
+    dbInfo->title.clear();
+    dbInfo->company.clear();
+    dbInfo->year.clear();
+    dbInfo->status.clear();
+    dbInfo->remark.clear();
+
+    std::string xml;
+    if (!LoadTextFileUTF8(xmlPath, xml))
+        return false;
+
+    size_t searchPos = 0;
+    while (true)
+    {
+        size_t softwareStart = xml.find("<software ", searchPos);
+        if (softwareStart == std::string::npos)
+            break;
+
+        size_t softwareTagEnd = xml.find(">", softwareStart);
+        if (softwareTagEnd == std::string::npos)
+            break;
+
+        size_t softwareEnd = xml.find("</software>", softwareTagEnd);
+        if (softwareEnd == std::string::npos)
+            break;
+
+        std::string softwareTag = xml.substr(softwareStart, softwareTagEnd - softwareStart + 1);
+        std::string softwareBody = xml.substr(softwareTagEnd + 1, softwareEnd - softwareTagEnd - 1);
+
+        size_t romSearchPos = 0;
+        while (true)
+        {
+            size_t romStart = softwareBody.find("<rom ", romSearchPos);
+            if (romStart == std::string::npos)
+                break;
+
+            size_t romEnd = softwareBody.find("/>", romStart);
+            if (romEnd == std::string::npos)
+                break;
+
+            std::string romTag = softwareBody.substr(romStart, romEnd - romStart + 2);
+
+            std::string romSha1;
+            if (FindXMLAttributeValue(romTag, "sha1", romSha1))
+            {
+                if (_stricmp(romSha1.c_str(), sha1.c_str()) == 0)
+                {
+                    dbInfo->found = true;
+                    FindXMLAttributeValue(softwareTag, "title", dbInfo->title);
+                    FindXMLAttributeValue(softwareTag, "company", dbInfo->company);
+                    FindXMLAttributeValue(softwareTag, "year", dbInfo->year);
+                    FindXMLAttributeValue(romTag, "status", dbInfo->status);
+                    FindXMLAttributeValue(romTag, "remark", dbInfo->remark);
+                    return true;
+                }
+            }
+
+            romSearchPos = romEnd + 2;
+        }
+
+        searchPos = softwareEnd + 11;
+    }
+
+    return true;
+}
+
+bool FindROMInfoWithPriority(const std::string& sha1, ROM_DB_INFO_EX* dbInfo, std::wstring& usedXmlPath)
+{
+    if (!dbInfo)
+        return false;
+
+    usedXmlPath.clear();
+
+    std::wstring softwareDbPath = L"softwaredb.xml";
+    DWORD softwareDbAttr = GetFileAttributesW(softwareDbPath.c_str());
+    bool softwareDbExists = (softwareDbAttr != INVALID_FILE_ATTRIBUTES) && !(softwareDbAttr & FILE_ATTRIBUTE_DIRECTORY);
+
+    std::wstring msxRomDbPath = L"msxromdb.xml";
+    DWORD msxRomDbAttr = GetFileAttributesW(msxRomDbPath.c_str());
+    bool msxRomDbExists = (msxRomDbAttr != INVALID_FILE_ATTRIBUTES) && !(msxRomDbAttr & FILE_ATTRIBUTE_DIRECTORY);
+
+    if (softwareDbExists)
+    {
+        usedXmlPath = softwareDbPath;
+        return FindROMInfoBySha1FromSoftwareDB(softwareDbPath, sha1, dbInfo);
+    }
+
+    if (msxRomDbExists)
+    {
+        usedXmlPath = msxRomDbPath;
+
+        ROM_DB_INFO oldInfo = {};
+        if (!FindROMInfoBySha1(msxRomDbPath, sha1, &oldInfo))
+            return false;
+
+        dbInfo->found = oldInfo.found;
+        dbInfo->title = oldInfo.title;
+        dbInfo->company = oldInfo.company;
+        dbInfo->year = oldInfo.year;
+        dbInfo->status.clear();
+        dbInfo->remark.clear();
+        return true;
+    }
+
+    return true;
+}
+
+bool IsIgnorableTagValue(const std::wstring& value)
+{
+    if (value.empty())
+        return true;
+    if (!_wcsicmp(value.c_str(), L"unknown"))
+        return true;
+    if (!_wcsicmp(value.c_str(), L"n/a"))
+        return true;
+    if (!_wcsicmp(value.c_str(), L"none"))
+        return true;
+    if (value == L"-")
+        return true;
+    return false;
+}
+
+std::wstring BuildAutoFileName(const ROM_DB_INFO_EX& dbInfo)
+{
+    std::wstring titleW = SanitizeFileName(Utf8ToWide(dbInfo.title));
+    std::wstring companyW = SanitizeFileName(Utf8ToWide(dbInfo.company));
+    std::wstring yearW = SanitizeFileName(Utf8ToWide(dbInfo.year));
+    std::wstring statusW = SanitizeFileName(Utf8ToWide(dbInfo.status));
+    std::wstring remarkW = SanitizeFileName(Utf8ToWide(dbInfo.remark));
+
+    std::wstring renamedFile = titleW + L"-" + companyW + L"(" + yearW + L")";
+
+    if (!IsIgnorableTagValue(statusW))
+        renamedFile += L"[" + statusW + L"]";
+
+    if (!IsIgnorableTagValue(remarkW))
+        renamedFile += L"[" + remarkW + L"]";
+
+    renamedFile += L".rom";
+    return renamedFile;
+}
+
 int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
 {
     HDEVINFO hDevInfo = SetupDiGetClassDevs(&GUID_DEVINTERFACE_COMPORT, 0, 0,
@@ -2376,10 +2615,6 @@ int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
         else
             outputDir = L".";
     }
-
-    std::wstring xmlPath = L"msxromdb.xml";
-    DWORD xmlAttr = GetFileAttributesW(xmlPath.c_str());
-    bool xmlExists = (xmlAttr != INVALID_FILE_ATTRIBUTES) && !(xmlAttr & FILE_ATTRIBUTE_DIRECTORY);
 
     SP_DEVINFO_DATA data = { sizeof(data) };
     BOOL foundDevice = FALSE;
@@ -2512,10 +2747,13 @@ int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
         std::wstring savePath;
         bool decidedSavePath = false;
 
-        ROM_DB_INFO dbInfo = {};
-        if (xmlExists)
+        ROM_DB_INFO_EX dbInfo = {};
+        std::wstring usedXmlPath;
+        bool xmlLoadOk = FindROMInfoWithPriority(sha1, &dbInfo, usedXmlPath);
+
+        if (!usedXmlPath.empty())
         {
-            if (FindROMInfoBySha1(xmlPath, sha1, &dbInfo))
+            if (xmlLoadOk)
             {
                 if (dbInfo.found)
                 {
@@ -2524,18 +2762,19 @@ int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
                     printf("Company: %s\n", dbInfo.company.c_str());
                     printf("Year   : %s\n", dbInfo.year.c_str());
 
-                    std::wstring titleW = SanitizeFileName(Utf8ToWide(dbInfo.title));
-                    std::wstring companyW = SanitizeFileName(Utf8ToWide(dbInfo.company));
-                    std::wstring yearW = SanitizeFileName(Utf8ToWide(dbInfo.year));
+                    if (!dbInfo.status.empty())
+                        printf("Status : %s\n", dbInfo.status.c_str());
+                    if (!dbInfo.remark.empty())
+                        printf("Remark : %s\n", dbInfo.remark.c_str());
 
-                    std::wstring renamedFile = titleW + L"[" + companyW + L"_" + yearW + L"].rom";
+                    std::wstring renamedFile = BuildAutoFileName(dbInfo);
                     savePath = JoinPath(outputDir, renamedFile);
                     decidedSavePath = true;
                 }
                 else
                 {
-                    printf("\n========== DB MATCH ==========\n");
-                    printf("No match found in msxromdb.xml\n");
+                    wprintf(L"\n========== DB MATCH ==========\n");
+                    wprintf(L"No match found in %s\n", usedXmlPath.c_str());
 
                     if (!autoFileNameMode && !requestedOutputPath.empty())
                     {
@@ -2558,7 +2797,7 @@ int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
             }
             else
             {
-                wprintf(L"\nFailed to load XML database: %s\n", xmlPath.c_str());
+                wprintf(L"\nFailed to load XML database: %s\n", usedXmlPath.c_str());
 
                 if (!autoFileNameMode && !requestedOutputPath.empty())
                 {
@@ -2581,7 +2820,7 @@ int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
         }
         else
         {
-            wprintf(L"\nXML database not found: %s\n", xmlPath.c_str());
+            wprintf(L"\nXML database not found: softwaredb.xml / msxromdb.xml\n");
 
             if (!autoFileNameMode && !requestedOutputPath.empty())
             {
@@ -2652,15 +2891,15 @@ int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
 
         if (!SaveROMToFile(finalOutputPath.c_str(), romData, romInfo.romSize))
         {
-            printf("[ERROR!!] File save failed\n");
+            printf("[ERROR] File save failed\n");
             free(romData);
             SlotPowerOff(hSerial);
             CloseHandle(hSerial);
             continue;
         }
 
-        wprintf(L"Saved output: %s\n", finalOutputPath.c_str());
-        printf("ROM read and save completed successfully!\n\n");
+        wprintf(L"\nSaved output: %s\n", finalOutputPath.c_str());
+        printf("\nROM read and save completed successfully!\n\n");
 
         SlotPowerOff(hSerial);
 
@@ -2722,7 +2961,8 @@ int wmain(int argc, wchar_t* argv[])
         wprintf(L"    If [output_directory] is omitted, the current directory is used.\n");
         wprintf(L"\n");
         wprintf(L"Notes:\n");
-        wprintf(L"  msxromdb.xml is loaded from the current directory.\n");
+        wprintf(L"  softwaredb.xml is used if present.\n");
+        wprintf(L"  If softwaredb.xml is not present, msxromdb.xml is used.\n");
         return 1;
     }
 

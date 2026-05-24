@@ -186,6 +186,62 @@ Windows向け：(VC++2019/2026で動作確認済)
 - **madscientさん作成 mgadump:**  [https://github.com/madscient/mgadump](https://github.com/madscient/mgadump)  
 - **t-bucchiさん作成 MSXPLAYer Game Cartidge Adapter GUI:**  [https://github.com/t-bucchi/msx-cartrigde-adapter-gui](https://github.com/t-bucchi/msx-cartrigde-adapter-gui)  
 
+### MSXCR_ROMDUMPER_FW260519 の使い方
+
+本プログラムは FW 260520 以降で追加された `SMTH` コマンドを利用して、
+ROM 読み出し時の HASH 値を取得しながらダンプを行う Windows 用ツールです。  
+
+#### コマンドライン
+
+- 出力ファイル名を指定する通常モード
+
+  ```bat
+  MSXCR_ROMDUMPER.exe dump.rom
+  ```
+
+- 出力先ディレクトリを指定する自動ファイル名モード
+
+  ```bat
+  MSXCR_ROMDUMPER.exe /AUTO
+  ```
+
+  または
+
+  ```bat
+  MSXCR_ROMDUMPER.exe /AUTO .\OUT
+  ```
+
+#### 各モードの説明
+
+**通常モード**
+
+コマンドライン引数に指定したファイル名で保存します。
+
+**自動ファイル名モード(/AUTO)**
+
+ROM 情報および HASH 値をもとに保存ファイル名を自動決定します。  
+第2引数を指定した場合は、そのフォルダーに保存します。  
+第2引数を省略した場合はカレントフォルダーに保存します。  
+
+#### msxromdb.xml/softwaredb.xml について
+
+本ソフトは、BlueMSX/OpenMSXのROM Databaseを利用した自動照合を行います。  
+'softwaredb.xml' または'msxromdb.xml' のファイル名で実行ファイルと同じフォルダーに配置してください。  
+本ファイルが存在する場合、ROM DB 情報を使った名称判定・ファイル名決定に利用されます。  
+
+XML形式のROM DatabaseはBlueMSXのインストールディレクトリーまたは、下記から入手可能です。[https://romdb.vampier.net/downloads.php](https://romdb.vampier.net/downloads.php)  
+
+#### 出力ファイル名について
+
+**通常モード**では、指定したファイル名そのままで保存されます。  
+**自動ファイル名モード**では、ROM の判定結果に応じた名前で保存されます。  
+`softwaredb.xml`/`msxromdb.xml` が利用できる場合は、ROM DB に登録された情報を優先してファイル名を決定します。  
+ROM DB が使えない場合や一致情報が得られない場合は、ROM サイズや HASH 値などを元にした自動生成名になります。  
+保存先に同名の既存ファイルがある場合は、そのファイルの内容を読み出して比較します。  
+既存ファイルの内容が同一であれば、ファイル名の先頭に `[same_+hash]` を付与します。  
+既存ファイルの内容が異なる場合は、ファイル名の先頭に `[other_+hash]` を付与します。  
+読み取りに失敗したと推測される場合は、ファイル名の先頭に `[unsuccessful]` を付与します。  
+
 ## ファームウェアについて
 
 下記フォルダーにコンパイル済のファームを置いてあります。  
