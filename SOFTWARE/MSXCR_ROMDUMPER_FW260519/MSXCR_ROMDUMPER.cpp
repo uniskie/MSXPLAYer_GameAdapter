@@ -907,7 +907,7 @@ static BOOL ReadHash5Match(HANDLE hSerial)
         // 5回すべて一致しているか
         if (!(h[0] == h[1] && h[0] == h[2] && h[0] == h[3] && h[0] == h[4]))
         {
-            printf("Hash mismatch\n");
+//            printf("Hash mismatch\n");
             return FALSE;
         }
 
@@ -1015,7 +1015,6 @@ static BOOL CheckHashWithRetry(HANDLE hSerial)
 
 // ============================================================================
 // Mapper Detection / Read Functions
-// (元コードそのまま)
 // ============================================================================
 
 static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
@@ -1029,9 +1028,10 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
     int identicalCount = 0;
     DWORD sramStartBank = 0;
     BOOL foundPattern = FALSE;
-    BOOL foundSRAM = FALSE;
     BYTE sramOrgData[4];
     BYTE sramData[4];
+
+    romInfo->hasSRAM = FALSE;
 
     if (!slotWrite(hSerial, 0x6000, 0)) return FALSE;
     if (!slotWrite(hSerial, 0x6800, 0)) return FALSE;
@@ -1093,7 +1093,7 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
             if (!slotWrite(hSerial, 0x8000, sramOrgData[0])) return FALSE;
             if (!slotWrite(hSerial, 0xA000, sramOrgData[2])) return FALSE;
             maxBank = bankNum;
-            foundSRAM = TRUE;
+            romInfo->hasSRAM = TRUE;
             foundPattern = TRUE;
             break;
         }
@@ -1114,7 +1114,7 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
         printf("\n=== ASCII 16K Detected ===\n");
         romInfo->mapperType = MAPPER_ASCII_16K;
 
-        if (foundSRAM)  romInfo->mapperName = "ASCII 16K(+SRAM)";
+        if (romInfo->hasSRAM)  romInfo->mapperName = "ASCII 16K(+SRAM)";
         else romInfo->mapperName = "ASCII 16K";
 
         romInfo->mapperName = "ASCII 16K";
@@ -1145,6 +1145,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
     BYTE sramOrgData[4];
     BYTE sramData[4];
 
+    romInfo->hasSRAM = FALSE;
 
     if (!slotWrite(hSerial, 0x6000, 0)) return FALSE;
     if (!slotWrite(hSerial, 0x6800, 1)) return FALSE;
@@ -1155,6 +1156,14 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
     if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
     if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+
+    //KONAMI8K check
+    if (!slotWrite(hSerial, 0x8000, 0)) return FALSE;
+    if (!slotWrite(hSerial, 0xA000, 0)) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+
+    if ((hashA[2] != hashB[2]) || (hashA[3] != hashB[3])) return FALSE;
 
     memcpy(prevHashA, hashA, sizeof(hashA));
     identicalCount = 0;
@@ -1209,7 +1218,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
             if (!slotWrite(hSerial, 0xA000, sramOrgData[0])) return FALSE;
             if (!slotWrite(hSerial, 0xB000, sramOrgData[2])) return FALSE;
             maxBank = bankNum + 2;
-            foundSRAM = TRUE;
+            romInfo->hasSRAM = TRUE;
             foundPattern = TRUE;
             break;
         }
@@ -1229,7 +1238,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
         printf("\n=== ASCII 8K Detected ===\n");
 
         romInfo->mapperType = MAPPER_ASCII_8K;
-        if (foundSRAM)  romInfo->mapperName = "ASCII 8K(+SRAM)";
+        if (romInfo->hasSRAM)  romInfo->mapperName = "ASCII 8K(+SRAM)";
         else romInfo->mapperName = "ASCII 8K";
         romInfo->bankCount = maxBank + 1;
         romInfo->romSize = romInfo->bankCount * 0x2000;
@@ -1247,13 +1256,15 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
 {
     printf("--- Testing KONAMI 8K ---\n");
 
-    DWORD hashA[4], hashB[4];
+    DWORD hashA[4], hashB[4], hashC[4];
     DWORD prevHashA[4];
     DWORD bankNum;
     DWORD maxBank = 0;
     int identicalCount = 0;
-    DWORD sramStartBank = 0;
     BOOL foundPattern = FALSE;
+
+    romInfo->hasSRAM = false;
+
 
     if (!slotWrite(hSerial, 0x4000, 3)) return FALSE;
     if (!slotWrite(hSerial, 0x6000, 0)) return FALSE;
@@ -1264,7 +1275,6 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
     if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
     if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
-    memcpy(prevHashA, hashA, sizeof(hashA));
 
     memcpy(prevHashA, hashA, sizeof(hashA));
     identicalCount = 0;
@@ -1286,6 +1296,18 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
             break;
         }
 
+        //新10倍カートリッジのチェック SRAMは4KBx2pageなので同じデータが連続する
+        if ((bankNum + 1) == 0x10) {
+            if (!slotReadHash(hSerial, 0x8000, 0x1000, &hashC[0])) return FALSE;
+            if (!slotReadHash(hSerial, 0x9000, 0x1000, &hashC[1])) return FALSE;
+            if (hashC[0] == hashC[1]) {
+                maxBank = bankNum;
+                romInfo->hasSRAM = TRUE;
+                foundPattern = TRUE;
+                break;
+            }
+        }
+
         if ((prevHashA[0] == hashB[0]) && (prevHashA[1] == hashB[1]) && (prevHashA[2] == hashB[2]) && (prevHashA[3] == hashB[3]))
         {
             break;
@@ -1304,10 +1326,8 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
     if (foundPattern && maxBank > 0)
     {
         printf("\n=== KONAMI 8K Detected ===\n");
-        if (romInfo->hasSRAM)
-            printf("(with SRAM)\n");
         romInfo->mapperType = MAPPER_KONAMI_8K;
-        romInfo->mapperName = romInfo->hasSRAM ? "KONAMI 8K (with SRAM)" : "KONAMI 8K";
+        romInfo->mapperName = romInfo->hasSRAM ? "KONAMI 8K (+SRAM)" : "KONAMI 8K";
         romInfo->bankCount = maxBank + 1;
         romInfo->romSize = romInfo->bankCount * 0x2000;
         romInfo->readBankSize = 0x2000;
