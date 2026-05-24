@@ -180,15 +180,72 @@ If it is working correctly, the contents of the cartridge will be displayed star
 For Windows: (Verified with VC++2019/2026)
 
 - **Game Cartridge Dump Sample:** [ROM Cartridge Dump Program](./SOFTWARE/MSXCR_ROMDUMPER/)
-- **Game Cartridge Dump Sample (FW:260520 upper):**  [ROM Cartridge Dump Program](./SOFTWARE/MSXCR_ROMDUMPER_FW260519/)
+- **Game Cartridge Dump Sample (requires FW 260520 or later):** [ROM Cartridge Dump Program](./SOFTWARE/MSXCR_ROMDUMPER_FW260519/)
 - **Script Engine Sample:** [MSX_SimpleCartridge Write Program](./SOFTWARE/SimpleROM64KWriter/)
   Compatible cartridge: [https://github.com/v9938/MSX_SimpleCartridge](https://github.com/v9938/MSX_SimpleCartridge)
 
 ### Other Programs
 
-- **Lithelia-san  MSX-PLAYer-GCA-Reader:**  [https://github.com/Lithelia/MSX-PLAYer-GCA-Reader](https://github.com/Lithelia/MSX-PLAYer-GCA-Reader)  
-- **madscient-san mgadump:**  [https://github.com/madscient/mgadump](https://github.com/madscient/mgadump)  
-- **t-bucchi-san  MSXPLAYer Game Cartidge Adapter GUI:**  [https://github.com/t-bucchi/msx-cartrigde-adapter-gui](https://github.com/t-bucchi/msx-cartrigde-adapter-gui)  
+- **MSX-PLAYer-GCA-Reader by Lithelia:** [https://github.com/Lithelia/MSX-PLAYer-GCA-Reader](https://github.com/Lithelia/MSX-PLAYer-GCA-Reader)
+- **mgadump by madscient:** [https://github.com/madscient/mgadump](https://github.com/madscient/mgadump)
+- **MSXPLAYer Game Cartidge Adapter GUI by t-bucchi:** [https://github.com/t-bucchi/msx-cartrigde-adapter-gui](https://github.com/t-bucchi/msx-cartrigde-adapter-gui)
+
+### How to Use MSXCR_ROMDUMPER_FW260519
+
+This Windows tool uses the `SMTH` command added in firmware version 260520 and later
+to dump a ROM while also obtaining its HASH value during the read process.
+
+#### Command Line
+
+- Normal mode with an explicitly specified output file name
+
+  ```bat
+  MSXCR_ROMDUMPER.exe dump.rom
+  ```
+
+- Automatic file naming mode with an explicitly specified output directory
+
+  ```bat
+  MSXCR_ROMDUMPER.exe /AUTO
+  ```
+
+  or
+
+  ```bat
+  MSXCR_ROMDUMPER.exe /AUTO .\OUT
+  ```
+
+#### Description of Each Mode
+
+**Normal Mode**
+
+The ROM is saved using the file name specified on the command line.
+
+**Automatic File Naming Mode (`/AUTO`)**
+
+The save file name is automatically determined based on ROM information and the HASH value.  
+If a second argument is specified, the file is saved into that folder.  
+If the second argument is omitted, the file is saved into the current folder.  
+
+#### About `msxromdb.xml` / `softwaredb.xml`
+
+This software performs automatic matching using the ROM database from BlueMSX / OpenMSX.  
+Place the file in the same folder as the executable using the name `softwaredb.xml` or `msxromdb.xml`.  
+If this file exists, the ROM DB information is used for title identification and file name determination.  
+
+The XML-format ROM database can be obtained from the BlueMSX installation directory or from the site below.  
+[https://romdb.vampier.net/downloads.php](https://romdb.vampier.net/downloads.php)
+
+#### About Output File Names
+
+In **Normal Mode**, the ROM is saved exactly with the file name you specify.  
+In **Automatic File Naming Mode**, the ROM is saved using a name based on the ROM identification result.  
+If `softwaredb.xml` / `msxromdb.xml` is available, the file name is determined primarily using the information registered in the ROM DB.  
+If the ROM DB is unavailable or no matching entry is found, an automatically generated name based on ROM size, HASH value, and similar information is used.  
+If a file with the same name already exists in the destination, the existing file is read and compared.  
+If the contents are identical, `[same_+hash]` is added to the beginning of the file name.  
+If the contents are different, `[other_+hash]` is added to the beginning of the file name.  
+If the dump is presumed to have failed, `[unsuccessful]` is added to the beginning of the file name.  
 
 ## Firmware
 
@@ -211,8 +268,8 @@ Running the batch file `ffu.bat` in the FFU folder above will update the firmwar
 ### File Structure (Overview)
 
 - `main.c`
-  - USB CDC reception (line buffer �� parsing)
-  - Command queue (Core 0 �� Core 1)
+  - USB CDC reception (line buffer → parsing)
+  - Command queue (Core 0 → Core 1)
   - Slot Memory / IO Read/Write
   - BRCV reception (binary receive mode)
   - BSND transmission (binary transmission queue)
@@ -220,13 +277,13 @@ Running the batch file `ffu.bat` in the FFU folder above will update the firmwar
   - Factory Test (GPIO test)
   - Script Engine (executeCommands)
 - `commands.c / commands.h`
-  - Command name �� Execution function (cmd_*) table (list of public commands)
+  - Command name → Execution function (cmd_*) table (list of public commands)
 - `ports.c / ports.h`
   - GPIO definitions (`board_pins[]`)
 - `ws2812.pio`
   - PIO program for WS2812 control (from SDK pico-examples)
 - `pwm_low_hiz.pio`
-  - PIO for slot clock (LOW �� Hi-Z)
+  - PIO for slot clock (LOW → Hi-Z)
 - `usb_descriptors.c / tusb_config.h`
   - USB CDC descriptor/buffer configuration
 
