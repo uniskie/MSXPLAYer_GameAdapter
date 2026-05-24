@@ -701,7 +701,7 @@ int slotWriteIO(uint16_t address, uint8_t data) {
     data_mask       = ((uint32_t) 0xff      << 8);  // データマスク
     data_data       = ((uint32_t) data      << 8);  // 出力データ
     wr_mask         = ((uint32_t) 1ULL << 5);      // WR マスク
-    io_mask         = ((uint32_t) 1ULL << 4);      // IO マスク
+    io_mask         = ((uint32_t) 1ULL << 3);      // IO マスク
 
     if (powerCheck() != CMD_OK) return CMD_FAIL;   // 電源チェック
     #ifdef PCBVER_B 
