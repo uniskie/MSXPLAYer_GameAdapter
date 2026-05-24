@@ -2401,7 +2401,7 @@ bool FindXMLAttributeValue(const std::string& text, const std::string& key, std:
     if (end == std::string::npos)
         return false;
 
-    value = text.substr(pos, end - pos);
+    value = DecodeXmlEntities(text.substr(pos, end - pos));
     return true;
 }
 
