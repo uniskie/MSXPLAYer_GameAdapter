@@ -14,19 +14,36 @@
 - Omitted arguments will use default behavior
 - Return values:
   - Normally returns `OK` / `FAIL` as the final result
-  - During `ERROFF`, OK/FAIL display is suppressed, only success/failure counts are updated
+  - During `ERROFF`, OK/FAIL display is suppressed, and only the success/failure counters are updated
 
 ## Command List (Specification Format / Implementation Compliant)
 
-### 1) HSET - Hardware Setting (Dummy/Not Implemented)
+### 1) HSET - Hardware Setting
 
-- **Function**: Hardware settings (currently a dummy)
+- **Function**: Configures wait times and compatibility modes for hardware access
 - **Format**: `HSET,[Address],[Data]`
 - **Arguments**:
-  - `Address` : Target configuration address (hexadecimal)
-  - `Data` : Configuration value (hexadecimal)
-- **Response**: `OK`
-- **Notes**: Currently no actual operation. Reserved for future expansion.
+  - `Address` : Setting item number (hexadecimal)
+  - `Data` : Setting value (hexadecimal; if omitted, the value is restored to its default)
+- **Response**: `OK` / `FAIL`
+- **Notes**:
+  - The current firmware supports the following settings.
+
+| Address | Setting Item | Description | Default |
+|---|---|---|---|
+| `0` | `MEMWAIT` | Wait time after memory read/write (`n x 10ns`) | `0` |
+| `1` | `RDWAIT` | `/RD` signal width during memory read (`n x 10ns`) | `100` |
+| `2` | `WRWAIT` | `/WR` signal width during memory write (`n x 10ns`) | `18` |
+| `3` | `P6MODE` | PC-6001 16KB mode setting (`0`: OFF / `1` or higher: ON) | `0` |
+
+- **Examples**:
+  - `HSET,1,64` : Sets `RDWAIT` to `1000ns = 1us`
+  - `HSET,1` : Restores `RDWAIT` to its default value
+
+- **Supplement**:
+  - The current values can be checked with the `HINF` command.
+  - The output of `HINF` includes `MEMWAIT` / `RDWAIT` / `WRWAIT` / `P6MODE`.
+  - Specifying an unsupported `Address` results in `FAIL`.
 
 ---
 
@@ -148,9 +165,9 @@
   - `PSGUNIT`: Presence of PSG unit
     Indicates whether the reader has PSG sound source equivalent functionality (1 = yes)
   - `LFCR`: Line feed code setting value
-    Displays the type of line feed code in the input COMMAND string (1 = "\n" = 0x0d, 0x0a treatment)
+    Displays the type of line feed code in the input COMMAND string (1 = `"\n"` = treated as 0x0d,0x0a)
   - `COMDBG`: Debug output setting via UART
-    When 1, debug output is configured to be output from UART
+    When set to 1, debug output is enabled on UART
   - `SCRLOOP`: Maximum LOOP count setting for script mode
     Displays the LOOP count for script mode. Initial value is 1000
 
@@ -175,7 +192,7 @@
 - **Format**: `SCHK`
 - **Arguments**: None
 - **Response**: One of `0000/0010/0100/0110` + `OK`
-- **Notes**: Response is a string in SLOT3210 order. Slots with inserted cartridges show 1.
+- **Notes**: The response is a string in SLOT3210 order. A slot with an inserted cartridge is shown as 1.
 
 ---
 
@@ -192,7 +209,7 @@
 
 ### 12) SPOFF - Slot Power OFF
 
-- **Function**: Powers off slot, returns signals to safe state
+- **Function**: Powers off slot, returns signals to a safe state
 - **Format**: `SPOFF`
 - **Arguments**: None
 - **Response**: `OK/FAIL`
@@ -202,7 +219,7 @@
 
 ### 13) SRST - Slot Reset
 
-- **Function**: Toggles slot RESET signal for reset
+- **Function**: Toggles the slot RESET signal to reset the slot
 - **Format**: `SRST`
 - **Arguments**: None
 - **Response**: `OK`
@@ -211,14 +228,14 @@
 
 ### 14) SSEL - Slot Select
 
-- **Function**: Sets default slot number
+- **Function**: Sets the default slot number
 - **Format**: `SSEL,[Slot]`
 - **Arguments**:
   - `Slot` : `1` or `2`
 - **Response**: `OK/FAIL`
 - **Notes**:
   - Omitting `Slot` results in `FAIL`
-  - This value is used when slot is omitted thereafter
+  - This value is used when the slot is omitted afterward
 
 ---
 
@@ -227,10 +244,10 @@
 - **Function**: Reads 1 byte from slot memory
 - **Format**: `SMRD,[Address](,[Slot])`
 - **Arguments**:
-  - `Address` : 0000〜FFFF　Slot memory address
+  - `Address` : 0000〜FFFF Slot memory address
   - `Slot` : 1 or 2 (uses defaultSlot if omitted)
 - **Response**:
-  - `<addr> : <data>` (e.g., `1000 : 3F`) + `OK/FAIL`
+  - `<addr> : <data>` (e.g. `1000 : 3F`) + `OK/FAIL`
 
 ---
 
@@ -239,8 +256,8 @@
 - **Function**: Writes 1 byte to slot memory
 - **Format**: `SMWR,[Address],[Data](,[Slot])`
 - **Arguments**:
-  - `Address` : 0000〜FFFF　Slot memory address
-  - `Data` : 00〜FF　Write data
+  - `Address` : 0000〜FFFF Slot memory address
+  - `Data` : 00〜FF Write data
   - `Slot` : 1 or 2 (uses defaultSlot if omitted)
 - **Response**: `OK/FAIL`
 
@@ -251,9 +268,9 @@
 - **Function**: Continuous read from slot to buffer
 - **Format**: `SMTR,[Address](,[Length],[BufferAddress],[Slot])`
 - **Arguments**:
-  - `Address` : 0000〜FFFF　Slot-side start address
-  - `Length` :  0000〜FFFF　Read length (maximum if omitted)
-  - `BufferAddress` :  0000〜FFFF　Buffer storage start position (0 if omitted)
+  - `Address` : 0000〜FFFF Slot-side start address
+  - `Length` : 0000〜FFFF Read length (maximum if omitted)
+  - `BufferAddress` : 0000〜FFFF Buffer storage start position (0 if omitted)
   - `Slot` : 1 or 2 (uses defaultSlot if omitted)
 - **Response**: `OK/FAIL`
 
@@ -264,8 +281,8 @@
 - **Function**: Continuous write from buffer to slot
 - **Format**: `SMTW,[Address],[Length],[BufferAddress](,[Slot])`
 - **Arguments**:
-  - `Address` :  0000〜FFFF　Slot-side start address
-  - `Length` :  0000〜FFFF　Write length
+  - `Address` : 0000〜FFFF Slot-side start address
+  - `Length` : 0000〜FFFF Write length
   - `BufferAddress` : Buffer read start position
   - `Slot` : 1 or 2 (uses defaultSlot if omitted)
 - **Response**: `OK/FAIL`
@@ -277,7 +294,7 @@
 - **Function**: Reads 1 byte from IO port
 - **Format**: `IORD,[IO]`
 - **Arguments**:
-  - `IO` :  0000〜FFFF　IO address (16-bit)
+  - `IO` : 0000〜FFFF IO address (16-bit)
 - **Response**:
   - `<io> : <data>` + `OK/FAIL`
 
@@ -288,19 +305,19 @@
 - **Function**: Writes 1 byte to IO port
 - **Format**: `IOWR,[IO],[Data]`
 - **Arguments**:
-  - `IO` :  0000〜FFFF　IO address
-  - `Data` : 00〜FF　Write data
+  - `IO` : 0000〜FFFF IO address
+  - `Data` : 00〜FF Write data
 - **Response**: `OK/FAIL`
 
 ---
 
 ### 21) IOTR - IO → Buffer Transfer Read (Implementation Compliant)
 
-- **Function**: Continuous read from IO and stores in buffer
+- **Function**: Continuous read from IO and stores it into the buffer
 - **Format**: `IOTR,[IO],[Length],[BufferAddress]`
 - **Arguments (Implementation Compliant)**:
-  - `IO` : 0000〜FFFF　Start IO address
-  - `Length` : 0000〜FFFF　Number of reads (bytes)
+  - `IO` : 0000〜FFFF Start IO address
+  - `Length` : 0000〜FFFF Number of reads (bytes)
   - `BufferAddress` : Buffer storage start position
 - **Response**: `OK/FAIL`
 
@@ -311,9 +328,9 @@
 - **Function**: Continuous write from buffer to IO
 - **Format**: `IOTW,[IO],[Length],[BufferAddress]`
 - **Arguments (Implementation Compliant)**:
-  - `IO` : 0000〜FFFF　Start IO address
-  - `Length` : 0000〜FFFF　Number of writes (bytes)
-  - `BufferAddress` : 0000〜FFFF　Buffer read start position
+  - `IO` : 0000〜FFFF Start IO address
+  - `Length` : 0000〜FFFF Number of writes (bytes)
+  - `BufferAddress` : 0000〜FFFF Buffer read start position
 - **Response**: `OK/FAIL`
 
 ---
@@ -323,19 +340,19 @@
 - **Function**: Displays buffer contents in HEX+ASCII
 - **Format**: `BDMP,[BufferAddress](,[Length])`
 - **Arguments**:
-  - `BufferAddress` : 0000〜FFFF　Start position (0 if omitted)
-  - `Length` : 0000〜FFFF　Display length (128 if omitted)
+  - `BufferAddress` : 0000〜FFFF Start position (0 if omitted)
+  - `Length` : 0000〜FFFF Display length (128 if omitted)
 - **Response**: Dump lines + `OK`
 
 ---
 
 ### 24) SDMP - Slot Dump (Slot Memory Dump)
 
-- **Function**: Reads directly from slot while displaying dump
+- **Function**: Reads directly from the slot while displaying a dump
 - **Format**: `SDMP,[Address](,[Length],[Slot])`
 - **Arguments**:
-  - `Address` : 0000〜FFFF　Start address (0 if omitted)
-  - `Length` : 0000〜FFFF　Display length (128 if omitted)
+  - `Address` : 0000〜FFFF Start address (0 if omitted)
+  - `Length` : 0000〜FFFF Display length (128 if omitted)
   - `Slot` : 1 or 2 (uses defaultSlot if omitted)
 - **Response**: Dump lines + `OK/FAIL`
 
@@ -343,21 +360,21 @@
 
 ### 25) BSCR - Buffer Script Execute (Script Execution)
 
-- **Function**: Executes script on buffer
+- **Function**: Executes a script on the buffer
 - **Format**: `BSCR,[BufferAddress](,[Slot])`
 - **Arguments**:
-  - `BufferAddress` :  0000〜FFFF　Script start (0 if omitted)
+  - `BufferAddress` : 0000〜FFFF Script start (0 if omitted)
   - `Slot` : 1 or 2 (uses defaultSlot if omitted)
 - **Response**: `OK/FAIL`
 - **Notes**:
-  - Instruction format is 4 bytes/instruction: `[cmd][addr_hi][addr_lo][data]`
-  - See separate section for script details
+  - Instruction format is 4 bytes per instruction: `[cmd][addr_hi][addr_lo][data]`
+  - See the separate section for script details
 
 ---
 
 ### 26) FTEST - Factory Test
 
-- **Function**: Executes comprehensive factory test
+- **Function**: Executes comprehensive factory tests
 - **Format**: `FTEST`
 - **Arguments**: None
 - **Response**: Test logs + `OK/FAIL`
@@ -366,64 +383,66 @@
 
 ### 27) LEDRDY / LEDPON / LEDACC - LED Color Setting
 
-- **Function**: Set LED color (READY/POWER ON/SLOT ACCESS) in RGB
+- **Function**: Sets LED colors (READY / POWER ON / SLOT ACCESS) in RGB
 - **Format**:
   - `LEDRDY(,[R],[G],[B])`
   - `LEDPON(,[R],[G],[B])`
   - `LEDACC(,[R],[G],[B])`
 - **Arguments**:
-  - `R` `G` `B` : 0x00〜0xFF (optional; default values if omitted)
+  - `R` `G` `B` : 0x00〜0xFF (optional; default values are used if omitted)
 - **Response**: `OK`
 
 ---
 
 ### 28) SDBGON - Serial Debug Log ON
 
-- **Function**: Enables debug log output from serial port
+- **Function**: Enables debug log output from the serial port
 - **Format**: `SDBGON`
 - **Arguments**: None
 - **Response**: `OK`
 - **Notes**:
-  - Output is from the GROVE port (UART)
-  - Enabling this feature will slow down execution speed
-  - Watch out for buffer overflow
+  - Execution speed decreases because serial output increases.
+  - Be careful of buffer overflows.
+  - Serial output is provided through the GROVE connector.
 
 ---
 
 ### 29) _FFU - Bootloader Launch
 
-- **Function**: Transitions to FFU mode, transitions to USB boot mode
+- **Function**: Switches to FFU mode and enters USB boot mode
 - **Format**: `_FFU`
 - **Arguments**: None
-- **Response**: Message output followed by reboot (no further OK/FAIL returned)
+- **Response**: Outputs a message and then reboots (no subsequent `OK/FAIL` is returned)
 
 ---
 
 ### 30) LSCR - Set Maximum LOOP Count for Script Mode
 
-- **Function**: Sets the maximum loop count for waiting on conditions in script mode
+- **Function**: Sets the maximum number of loops for waiting on a condition in Script mode
 - **Format**: `LSCR(,Maximum LOOP Count)`
-- **Arguments**: 0-0xFFFF (default 1000 if omitted)
+- **Arguments**: 0-0xFFFF (default is 1000 when omitted)
 - **Response**: `OK`
 
 ---
 
-### 17) SMTH - Slot → Buffer Transfer Read (Bulk Read) with HASH
+[Added in 260520_VER]
 
-- **Function**: Continuous read from slot to buffer + 32bit Hash
-- **Format**: `SMTR,[Address](,[Length],[BufferAddress],[Slot])`
+### 31) SMTH - Slot → Buffer Transfer Read (Bulk Read) + HASH
+
+- **Function**: Continuously reads from the slot into the buffer and calculates a 32-bit hash code
+- **Format**: `SMTH,[Address](,[Length],[BufferAddress],[Slot])`
 - **Arguments**:
-  - `Address` : 0000〜FFFF　Slot-side start address
-  - `Length` :  0000〜FFFF　Read length (maximum if omitted)
-  - `BufferAddress` :  0000〜FFFF　Buffer storage start position (0 if omitted)
+  - `Address` : 0000〜FFFF Slot-side start address
+  - `Length` : 0000〜FFFF Read length (maximum if omitted)
+  - `BufferAddress` : 0000〜FFFF Buffer storage start position (0 if omitted)
   - `Slot` : 1 or 2 (uses defaultSlot if omitted)
-- **Response**: `<Length> : <HASH 32bit>`+`OK/FAIL`
+- **Response**: `<Length> : <32-bit HASH>` + `OK/FAIL`
 
 ---
 
 ## Serial Command Examples
 
-### Example 1: Read slot 0x0000〜0x3FFF and send to PC
+### Example 1: Read 0x0000-0x3FFF from the slot and send it to the PC
 
 ```CMD_EX1
 SPON
@@ -432,7 +451,7 @@ BSND,0000,4000
 SPOFF
 ```
 
-### Example 2: Receive binary from PC and write to 0x8000
+### Example 2: Receive binary data from the PC and write it to 0x8000
 
 ```CMD_EX2
 SPON
@@ -444,13 +463,13 @@ SPOFF
 
 ## Script Mode
 
-A mode that allows data read/write and comparison execution without communication with the PC
-by using scripts placed in the buffer.
+By using a script placed in the buffer, this mode allows data read/write and comparisons
+to be executed without communicating with the PC.
 
 ## Script Format
 
 - Script format: [Command],[Address(2Byte)],[DATA]...
-- Each script is fixed-length at 4 bytes
+- Each script is fixed-length at 4 bytes.
 
 ### Script Data Format
 
@@ -463,26 +482,26 @@ by using scripts placed in the buffer.
 |Command|Instruction Name|Description|
 |---|---|---|
 |0x00|NOP|Do nothing|
-|0x01|Read Memory|Executes Read against slot|
-|0x02|Write Memory|Writes DATA to slot (LastData is overwritten with DATA)|
-|0x03|Read IO|Executes Read using IO against slot (LastData becomes the read DATA)|
-|0x04|Write IO|Executes Write using IO against slot (LastData is overwritten with DATA)|
-|0x05|Wait|Waits for the duration specified in address (milliseconds)|
-|0x06|Compare|Compares LastData with data. If matched, skips next instruction|
-|0x07|AND|Calculates LastData [AND] DATA. If result is 0x00, skips next instruction|
-|0x08|OR|Calculates LastData [OR] DATA. If result is 0x00, skips next instruction|
-|0x09|XOR|Calculates LastData [XOR] DATA. If result is 0x00, skips next instruction|
-|0x0A|JMP|Skips instructions by the amount of DATA (0x00-7F=forward/0x80-FF=backward)|
-|0x0B|PUSH|Writes lastData to the Buffer memory location specified by the address|
-|0xFE|Abort|Terminates script execution with failure|
-|0xFF|End|Terminates script execution with success|
+|0x01|Read Memory|Executes a read from the slot|
+|0x02|Write Memory|Writes DATA to the slot (LastData is overwritten with DATA)|
+|0x03|Read IO|Executes an IO read from the slot (LastData becomes the read DATA)|
+|0x04|Write IO|Executes an IO write to the slot (LastData is overwritten with DATA)|
+|0x05|Wait|Waits for the time specified by address in milliseconds|
+|0x06|Compare|Compares LastData with data; if they match, the next instruction is skipped|
+|0x07|AND|Calculates LastData [AND] DATA; if the result is 0x00, the next instruction is skipped|
+|0x08|OR|Calculates LastData [OR] DATA; if the result is 0x00, the next instruction is skipped|
+|0x09|XOR|Calculates LastData [XOR] DATA; if the result is 0x00, the next instruction is skipped|
+|0x0A|JMP|Skips instructions by the amount in DATA (`0x00-7F` = forward / `0x80-FF` = backward)|
+|0x0B|PUSH|Writes lastData to the buffer memory location specified by address|
+|0xFE|Abort|Ends script execution with failure|
+|0xFF|End|Ends script execution with success|
 
-※ JMP instruction fails the script if executed at the same location over a certain number of times (default 1000).
-This value can be changed with the "LSCR" command.
+*The JMP instruction causes script failure if it is executed at the same location a certain number of times (default: 1000).*  
+*This value can be changed with the `LSCR` command.*
 
 ### Script Example
 
-Executable with the following command:
+This can be executed with the following command:
 
 ```CMD_BRCV
 BRCV,0,20
@@ -492,21 +511,21 @@ BSCR,0
 
 |Binary Value|Command|Description|
 |---|---|---|
-|0x02,0x55,0x55,0xaa|[Write Memory]  Address:0x5555 Data:0xaa|Write 0xAA to 0x5555|
-|0x02,0xaa,0xaa,0x55|[Write Memory]  Address:0xaaaa Data:0x55|Write 0x55 to 0xAAAA|
-|0x02,0x55,0x55,0xa0|[Write Memory]  Address:0x5555 Data:0xa0|Write 0xA0 to 0x5555|
-|0x02,0x40,0x00,0x41|[Write Memory]  Address:0x4000 Data:0x41|Write 0x41 to 0x4000|
-|0x01,0x40,0x00,0x00|[Read Memory]  Address:0x4000|Read data from 0x4000|
-|0x06,0x00,0x00,0x41|[Compare]  Data:0x40|Compare with previously read data; skip next instruction if 0x40|
-|0x0a,0x00,0x00,0xfe|[JMP] -2|Jump back 2 instructions (loop until 0x4000 becomes 0x40)|
+|0x02,0x55,0x55,0xaa|[Write Memory] Address:0x5555 Data:0xaa|Write 0xAA to 0x5555|
+|0x02,0xaa,0xaa,0x55|[Write Memory] Address:0xaaaa Data:0x55|Write 0x55 to 0xAAAA|
+|0x02,0x55,0x55,0xa0|[Write Memory] Address:0x5555 Data:0xa0|Write 0xA0 to 0x5555|
+|0x02,0x40,0x00,0x41|[Write Memory] Address:0x4000 Data:0x41|Write 0x41 to 0x4000|
+|0x01,0x40,0x00,0x00|[Read Memory] Address:0x4000|Read data from 0x4000|
+|0x06,0x00,0x00,0x41|[Compare] Data:0x40|Compare with the previously read data; if it is 0x40, skip the next instruction|
+|0x0a,0x00,0x00,0xfe|[JMP] -2|Go back two instructions (that is, loop until 0x4000 becomes 0x40)|
 |0xff,0x00,0x00,0x00|End|End script|
 
 ## Debugging
 
-You can obtain execution logs from the GROVE port (UART) by executing the "SDBGON" command.
-However, enabling this feature will slow down execution, so it is normally disabled.
+By executing the `SDBGON` command, execution logs can be obtained from the GROVE connector (UART).  
+However, enabling this feature slows execution, so it should normally remain disabled.
 
-The serial port uses 3.3V logic levels, and the wiring configuration is as described below.
+The serial port uses 3.3V levels, and the wiring is as shown below.  
 ![UART](./IMAGE/uart.jpg)
 
 ### Output Example
