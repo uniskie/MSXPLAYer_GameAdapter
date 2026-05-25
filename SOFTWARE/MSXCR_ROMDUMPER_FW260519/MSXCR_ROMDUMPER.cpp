@@ -1770,6 +1770,28 @@ static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD hash8 = Hash7936(fullDataBuffer, 0x8000);
     DWORD hashA = Hash7936(fullDataBuffer, 0xA000);
 
+    if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381) && (hash4 != 0x6dd86381) && (hash4 == hash6) && (hash8 == 0x6dd86381) && (hashA == 0x6dd86381))
+    {
+        printf("\n=== 8KB Mirrored ROM Detected ===\n");
+        romInfo->mapperType = MAPPER_NO_MAPPER_16K;
+        romInfo->mapperName = "8KB ROM (Mirrored)";
+        romInfo->romSize = 0x2000;
+        romInfo->validDataStart = 0x4000;
+        romInfo->validDataSize = 0x2000;
+        return TRUE;
+    }
+
+    if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381)  && (hash4 == 0x6dd86381) && (hash6 == 0x6dd86381) && (hash8 != 0x6dd86381) && (hash8 == hashA))
+    {
+        printf("\n=== 8KB Mirrored ROM Detected ===\n");
+        romInfo->mapperType = MAPPER_NO_MAPPER_16K;
+        romInfo->mapperName = "8KB ROM (Mirrored)";
+        romInfo->romSize = 0x2000;
+        romInfo->validDataStart = 0x8000;
+        romInfo->validDataSize = 0x2000;
+        return TRUE;
+    }
+
     if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381) && (hash4 != 0x6dd86381) && (hash6 == 0x6dd86381) && (hash8 == 0x6dd86381) && (hashA == 0x6dd86381))
     {
         printf("\n=== 16KB Standard ROM Detected ===\n");
