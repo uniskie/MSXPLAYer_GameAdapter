@@ -5,7 +5,8 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>dump.rom</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>/AUTO</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerCommandArgumentsHistory>dump.rom|</LocalDebuggerCommandArgumentsHistory>
   </PropertyGroup>
 </Project>
