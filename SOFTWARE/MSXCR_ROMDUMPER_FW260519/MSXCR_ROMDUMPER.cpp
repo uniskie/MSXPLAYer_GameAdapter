@@ -24,11 +24,13 @@
 
 #define BANK_SIZE           0x2000  // 8K bank size
 #define SLOT_ADDR_BASE      0x4000  // Slot base address
-#define HASH_SIZE           7936    // Hash calculation size
+#define HASH_SIZE           0x1000  // Hash calculation size
+//#define HASH_SIZE           0x1f00  // Hash calculation size
 #define MAX_RESPONSE_LEN    256
 #define TIMEOUT_MS          5000
 #define SRAM_THRESHOLD      8       // Number of identical banks to detect SRAM
-// #define DISPLAY_HASH               // Display HASH
+//#define DISPLAY_HASH               // Display HASH
+
 
 // MegaROM Mapper Types
 typedef enum {
@@ -875,6 +877,19 @@ static DWORD Hash7936(const BYTE* data, DWORD address)
     return hash;
 }
 
+static DWORD HashFilledFF(DWORD length)
+{
+    DWORD hash = 0x5381;
+    DWORD i;
+
+    for (i = 0; i < length; i++)
+    {
+        hash = ((hash << 5) + hash) ^ 0xff;
+    }
+
+    return hash;
+}
+
 // ============================================================================
 // ROM ACCESS Timing Setting
 // ============================================================================
@@ -885,6 +900,7 @@ static BOOL ReadHash5Match(HANDLE hSerial)
     DWORD addr;
     int i;
     int retry;
+    const DWORD filledFFHash = HashFilledFF(HASH_SIZE);
 
     for (retry = 0; retry < 2; retry++)
     {
@@ -892,7 +908,7 @@ static BOOL ReadHash5Match(HANDLE hSerial)
 
         for (i = 0; i < 5; i++)
         {
-            if (!slotReadHash(hSerial, addr, 0x1f00, &h[i]))
+            if (!slotReadHash(hSerial, addr, HASH_SIZE, &h[i]))
             {
                 printf("slotReadHash failed at try %d\n", i + 1);
                 return FALSE;
@@ -911,8 +927,8 @@ static BOOL ReadHash5Match(HANDLE hSerial)
             return FALSE;
         }
 
-        // 0x4000 で全て 0x6DD86381 の場合のみ、0x8000 で再試行
-        if (h[0] == 0x6DD86381)
+        // 0x4000 で全て filledFFHash の場合のみ、0x8000 で再試行
+        if (h[0] == filledFFHash)
         {
             if (retry == 0)
             {
@@ -929,14 +945,14 @@ static BOOL ReadHash5Match(HANDLE hSerial)
     return FALSE;
 }
 
-// address 0 を 100(1us) ずつ 3000(30us) まで変更しながら hash 一致を確認
+// address 0 を 100(1us) ずつ 1000(10us) まで変更しながら hash 一致を確認
 static BOOL SweepAddress0AndCheck(HANDLE hSerial)
 {
     DWORD d;
 
-    for (d = 100; d <= 3000; d += 100)
+    for (d = 100; d <= 1000; d += 100)
     {
-        printf("hardwareSetting(address=0, data=%lu)\n", d);
+        printf("HardwareSetting (wait %d us)\n", d/100);
 
         if (!hardwareSetting(hSerial, 0, d))
         {
@@ -969,17 +985,16 @@ static BOOL CheckHashWithRetry(HANDLE hSerial)
         return TRUE;
     }
     printf("FAILED\n");
-    printf("Checking other setting1... ");
+    printf("Phase 1: Checking setting1 ... (/rd = 1us) \n");
     // Phase 1:
     // address 0 を 1us 刻みで 100us まで変更しながら確認
     if (SweepAddress0AndCheck(hSerial))
     return TRUE;
 
     printf("FAILED\n");
-    printf("Checking other setting2... ");
     // Phase 2:
     // address 0 を 0 に戻し、address 1 を 200(2us) に設定して再試行
-    printf("Phase 2: set address 0 = 0, address 1 = 200\n");
+    printf("Phase 2: Checking setting2 ... (/rd = 2us) \n");
 
     if (!hardwareSetting(hSerial, 0, 0))
     {
@@ -1030,6 +1045,8 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
     BOOL foundPattern = FALSE;
     BYTE sramOrgData[4];
     BYTE sramData[4];
+    const DWORD filledFFHash = HashFilledFF(HASH_SIZE);
+
 
     romInfo->hasSRAM = FALSE;
 
@@ -1038,10 +1055,10 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0x7000, 1)) return FALSE;
     if (!slotWrite(hSerial, 0x7800, 1)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
 #ifdef DISPLAY_HASH
     printf("Bank 0: Hash[0x4000]=%08lX, Hash[0x6000]=%08lX, Hash[0x8000]=%08lX, Hash[0xA000]=%08lX\n",
@@ -1058,16 +1075,18 @@ static BOOL DetectASCII16K(HANDLE hSerial, ROM_INFO* romInfo)
         if (!slotWrite(hSerial, 0x7000, (BYTE)(bankNum + 1))) return FALSE;
         if (!slotWrite(hSerial, 0x7800, 1)) return FALSE;
 
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-        if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-        if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-        if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+        if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+        if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+        if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
-        if ((bankNum % 4 == 0) && (0x6dd86381 == hashB[0]) && (0x6dd86381 == hashB[1]) && (0x6dd86381 == hashB[2]) && (0x6dd86381 == hashB[3]))
+        // BS6101対策(ROMANCIA/YoungSherlock etc)
+        if ((bankNum == 1) && (hashB[0] == prevHashA[0]) && (hashB[1] == prevHashA[1])) break;
+
+        if ((bankNum % 4 == 0) && (filledFFHash == hashB[0]) && (filledFFHash == hashB[1]) && (filledFFHash == hashB[2]) && (filledFFHash == hashB[3]))
         {
             break;
         }
-
         if ((prevHashA[0] == hashB[0]) && (prevHashA[1] == hashB[1]) && (prevHashA[2] == hashB[2]) && (prevHashA[3] == hashB[3]))
         {
             break;
@@ -1144,6 +1163,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
     BOOL foundPattern = FALSE;
     BYTE sramOrgData[4];
     BYTE sramData[4];
+    const DWORD filledFFHash = HashFilledFF(HASH_SIZE);
 
     romInfo->hasSRAM = FALSE;
 
@@ -1152,16 +1172,16 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0x7000, 2)) return FALSE;
     if (!slotWrite(hSerial, 0x7800, 3)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
     //KONAMI8K check
     if (!slotWrite(hSerial, 0x8000, 0)) return FALSE;
     if (!slotWrite(hSerial, 0xA000, 0)) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
     if ((hashA[2] != hashB[2]) || (hashA[3] != hashB[3])) return FALSE;
 
@@ -1180,12 +1200,16 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
         if (!slotWrite(hSerial, 0x7000, (BYTE)(bankNum + 2))) return FALSE;
         if (!slotWrite(hSerial, 0x7800, (BYTE)(bankNum + 3))) return FALSE;
 
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-        if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-        if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-        if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+        if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+        if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+        if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
-        if ((bankNum % 8 == 0) && (0x6dd86381 == hashB[0]) && (0x6dd86381 == hashB[1]) && (0x6dd86381 == hashB[2]) && (0x6dd86381 == hashB[3]))
+        // BS6101対策(ROMANCIA/YoungSherlock etc)
+        if ((bankNum == 1) && (hashB[0] == prevHashA[0]) ) break;
+
+
+        if ((bankNum % 8 == 0) && (filledFFHash == hashB[0]) && (filledFFHash == hashB[1]) && (filledFFHash == hashB[2]) && (filledFFHash == hashB[3]))
         {
             break;
         }
@@ -1252,6 +1276,7 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
     return FALSE;
 }
 
+
 static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
 {
     printf("--- Testing KONAMI 8K ---\n");
@@ -1262,6 +1287,7 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD maxBank = 0;
     int identicalCount = 0;
     BOOL foundPattern = FALSE;
+    const DWORD filledFFHash = HashFilledFF(HASH_SIZE);
 
     romInfo->hasSRAM = false;
 
@@ -1271,10 +1297,10 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0x8000, 1)) return FALSE;
     if (!slotWrite(hSerial, 0xA000, 2)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
     memcpy(prevHashA, hashA, sizeof(hashA));
     identicalCount = 0;
@@ -1286,12 +1312,12 @@ static BOOL DetectKONAMI8K(HANDLE hSerial, ROM_INFO* romInfo)
         if (!slotWrite(hSerial, 0x8000, (BYTE)(bankNum + 1))) return FALSE;
         if (!slotWrite(hSerial, 0xA000, (BYTE)(bankNum + 2))) return FALSE;
 
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-        if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-        if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-        if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+        if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+        if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+        if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
-        if ((bankNum % 8 == 0) && (0x6dd86381 == hashB[1]) && (0x6dd86381 == hashB[2]) && (0x6dd86381 == hashB[3]))
+        if ((bankNum % 8 == 0) && (filledFFHash == hashB[1]) && (filledFFHash == hashB[2]) && (filledFFHash == hashB[3]))
         {
             break;
         }
@@ -1349,6 +1375,8 @@ static BOOL DetectKONAMI_SCC(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD bankNum;
     DWORD maxBank = 0;
     BOOL foundPattern = FALSE;
+    const DWORD filledFFHash = HashFilledFF(HASH_SIZE);
+
 
     if (!slotWrite(hSerial, 0x5000, 0)) return FALSE;
     if (!slotWrite(hSerial, 0x7000, 1)) return FALSE;
@@ -1359,10 +1387,10 @@ static BOOL DetectKONAMI_SCC(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0x9800, 2)) return FALSE;
     if (!slotWrite(hSerial, 0xB800, 3)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
     memcpy(prevHashA, hashA, sizeof(hashA));
 
@@ -1377,12 +1405,12 @@ static BOOL DetectKONAMI_SCC(HANDLE hSerial, ROM_INFO* romInfo)
         if (!slotWrite(hSerial, 0x9800, 2)) return FALSE;
         if (!slotWrite(hSerial, 0xB800, 3)) return FALSE;
 
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-        if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-        if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-        if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+        if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+        if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+        if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
-        if ((bankNum % 8 == 0) && (0x6dd86381 == hashB[1]) && (0x6dd86381 == hashB[2]) && (0x6dd86381 == hashB[3]))
+        if ((bankNum % 8 == 0) && (filledFFHash == hashB[1]) && (filledFFHash == hashB[2]) && (filledFFHash == hashB[3]))
         {
             break;
         }
@@ -1430,16 +1458,18 @@ static BOOL DetectGeneric16K(HANDLE hSerial, ROM_INFO* romInfo)
     int identicalCount = 0;
     DWORD sramStartBank = 0;
     BOOL foundPattern = FALSE;
+    const DWORD filledFFHash = HashFilledFF(HASH_SIZE);
+
 
     if (!slotWrite(hSerial, 0x4000, 0)) return FALSE;
     if (!slotWrite(hSerial, 0x6000, 0)) return FALSE;
     if (!slotWrite(hSerial, 0x8000, 1)) return FALSE;
     if (!slotWrite(hSerial, 0xA000, 1)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
     memcpy(prevHashA, hashA, sizeof(hashA));
     memcpy(prevHashA, hashA, sizeof(hashA));
@@ -1452,12 +1482,12 @@ static BOOL DetectGeneric16K(HANDLE hSerial, ROM_INFO* romInfo)
         if (!slotWrite(hSerial, 0x8000, (BYTE)(bankNum + 1))) return FALSE;
         if (!slotWrite(hSerial, 0x7800, 1)) return FALSE;
 
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-        if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-        if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-        if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+        if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+        if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+        if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
-        if ((bankNum % 4 == 0) && (0x6dd86381 == hashB[0]) && (0x6dd86381 == hashB[1]) && (0x6dd86381 == hashB[2]) && (0x6dd86381 == hashB[3]))
+        if ((bankNum % 4 == 0) && (filledFFHash == hashB[0]) && (filledFFHash == hashB[1]) && (filledFFHash == hashB[2]) && (filledFFHash == hashB[3]))
         {
             break;
         }
@@ -1504,16 +1534,18 @@ static BOOL DetectGeneric8K(HANDLE hSerial, ROM_INFO* romInfo)
     int identicalCount = 0;
     DWORD sramStartBank = 0;
     BOOL foundPattern = FALSE;
+    const DWORD filledFFHash = HashFilledFF(HASH_SIZE);
+
 
     if (!slotWrite(hSerial, 0x4000, 0)) return FALSE;
     if (!slotWrite(hSerial, 0x6000, 1)) return FALSE;
     if (!slotWrite(hSerial, 0x8000, 2)) return FALSE;
     if (!slotWrite(hSerial, 0xA000, 3)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
     memcpy(prevHashA, hashA, sizeof(hashA));
     memcpy(prevHashA, hashA, sizeof(hashA));
@@ -1526,12 +1558,12 @@ static BOOL DetectGeneric8K(HANDLE hSerial, ROM_INFO* romInfo)
         if (!slotWrite(hSerial, 0x8000, (BYTE)(bankNum + 2))) return FALSE;
         if (!slotWrite(hSerial, 0xa000, (BYTE)(bankNum + 3))) return FALSE;
 
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-        if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-        if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-        if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+        if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+        if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+        if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
-        if ((bankNum % 8 == 0) && (0x6dd86381 == hashB[0]) && (0x6dd86381 == hashB[1]) && (0x6dd86381 == hashB[2]) && (0x6dd86381 == hashB[3]))
+        if ((bankNum % 8 == 0) && (filledFFHash == hashB[0]) && (filledFFHash == hashB[1]) && (filledFFHash == hashB[2]) && (filledFFHash == hashB[3]))
         {
             break;
         }
@@ -1578,32 +1610,33 @@ static BOOL DetectRType(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD sramStartBank = 0;
     BOOL foundPattern = FALSE;
 
+
     if (!slotWrite(hSerial, 0x7000, 0x0f)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
     memcpy(prevHashA, hashA, sizeof(hashA));
 
     if (!slotWrite(hSerial, 0x6000, 0x01)) return FALSE;
     if (!slotWrite(hSerial, 0x7800, 0x1f)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
     if ((hashA[0] != hashB[0]) || (hashA[1] != hashB[1]) || (hashA[2] != hashB[2]) || (hashA[3] != hashB[3])) return FALSE;
 
     if (!slotWrite(hSerial, 0x6800, 0x00)) return FALSE;
     if (!slotWrite(hSerial, 0x7800, 0x00)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hashB[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hashB[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hashB[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hashB[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
     if ((hashA[0] == hashB[0]) && (hashA[1] == hashB[1]) && (hashA[2] != hashB[2]) && (hashA[3] != hashB[3]))
     {
@@ -1635,19 +1668,19 @@ static BOOL DetectHarryFox(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0x6000, 0x00)) return FALSE;
     if (!slotWrite(hSerial, 0x7000, 0x00)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &prevHashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &prevHashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &prevHashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &prevHashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &prevHashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &prevHashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &prevHashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &prevHashA[3])) return FALSE;
 
     /* 基準パターンB取得 */
     if (!slotWrite(hSerial, 0x6000, 0x01)) return FALSE;
     if (!slotWrite(hSerial, 0x7000, 0x01)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &prevHashB[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &prevHashB[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &prevHashB[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &prevHashB[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &prevHashB[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &prevHashB[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &prevHashB[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &prevHashB[3])) return FALSE;
 
     if ((prevHashA[0] == prevHashB[0]) || (prevHashA[1] == prevHashB[1]) || (prevHashA[2] == prevHashB[2]) || (prevHashA[3] == prevHashB[3])) return FALSE;
  
@@ -1659,10 +1692,10 @@ static BOOL DetectHarryFox(HANDLE hSerial, ROM_INFO* romInfo)
         if (!slotWrite(hSerial, 0x6fff, i)) return FALSE;
         if (!slotWrite(hSerial, 0x7fff, i)) return FALSE;
 
-        if (!slotReadHash(hSerial, 0x4000, 0x1f00, &hash[0])) return FALSE;
-        if (!slotReadHash(hSerial, 0x6000, 0x1f00, &hash[1])) return FALSE;
-        if (!slotReadHash(hSerial, 0x8000, 0x1f00, &hash[2])) return FALSE;
-        if (!slotReadHash(hSerial, 0xa000, 0x1f00, &hash[3])) return FALSE;
+        if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hash[0])) return FALSE;
+        if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hash[1])) return FALSE;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hash[2])) return FALSE;
+        if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hash[3])) return FALSE;
 
         if ((hash[0] != expectedHash[0]) ||
             (hash[1] != expectedHash[1]) ||
@@ -1691,10 +1724,8 @@ static BOOL DetectHalnote(HANDLE hSerial, ROM_INFO* romInfo)
 {
     printf("--- Testing HALNOTE ---\n");
 
-    DWORD hash[4];
     DWORD prevHashA[4];
     DWORD prevHashB[4];
-    BYTE i;
 
     /* 基準パターンA取得 */
     if (!slotWrite(hSerial, 0x4FFF, 0x00)) return FALSE;
@@ -1703,12 +1734,14 @@ static BOOL DetectHalnote(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0xAFFF, 0x00)) return FALSE;
 
     // Main Mapper
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &prevHashA[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &prevHashA[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &prevHashA[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &prevHashA[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &prevHashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &prevHashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &prevHashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &prevHashA[3])) return FALSE;
 
     if ((prevHashA[0] != prevHashA[1]) || (prevHashA[1] != prevHashA[2]) || (prevHashA[2] != prevHashA[3])) return FALSE;
+
+    if (!slotReadHash(hSerial, 0x6C00, 0x0800, &prevHashA[1])) return FALSE;
 
     if (!slotWrite(hSerial, 0x4FFF, 0x00)) return FALSE;
     if (!slotWrite(hSerial, 0x6FFF, 0x01)) return FALSE;
@@ -1716,10 +1749,10 @@ static BOOL DetectHalnote(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0xAFFF, 0x00)) return FALSE;
 
     // Main Mapper
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &prevHashB[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &prevHashB[1])) return FALSE;
-    if (!slotReadHash(hSerial, 0x8000, 0x1f00, &prevHashB[2])) return FALSE;
-    if (!slotReadHash(hSerial, 0xa000, 0x1f00, &prevHashB[3])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &prevHashB[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &prevHashB[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &prevHashB[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &prevHashB[3])) return FALSE;
 
     if ((prevHashA[0] == prevHashB[1]) || (prevHashA[0] == prevHashB[2]) || (prevHashB[0] != prevHashB[3])) return FALSE;
 
@@ -1727,8 +1760,8 @@ static BOOL DetectHalnote(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotWrite(hSerial, 0x4FFF, 0x40)) return FALSE;
     if (!slotWrite(hSerial, 0x6FFF, 0x80)) return FALSE;
 
-    if (!slotReadHash(hSerial, 0x4000, 0x1f00, &prevHashB[0])) return FALSE;
-    if (!slotReadHash(hSerial, 0x6000, 0x1f00, &prevHashB[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &prevHashB[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6C00, 0x0800, &prevHashB[1])) return FALSE;
     if (!slotReadHash(hSerial, 0x4000, 0x0800, &prevHashB[2])) return FALSE;
     if (!slotReadHash(hSerial, 0x7000, 0x0800, &prevHashB[3])) return FALSE;
 
@@ -1753,6 +1786,9 @@ static BOOL DetectHalnote(HANDLE hSerial, ROM_INFO* romInfo)
 static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
 {
     BYTE fullDataBuffer[0xC000];
+    DWORD filledFFHash;
+
+    filledFFHash = HashFilledFF(HASH_SIZE);
 
     printf("=== Detecting Standard ROM Type ===\n");
 
@@ -1770,7 +1806,29 @@ static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
     DWORD hash8 = Hash7936(fullDataBuffer, 0x8000);
     DWORD hashA = Hash7936(fullDataBuffer, 0xA000);
 
-    if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381) && (hash4 != 0x6dd86381) && (hash6 == 0x6dd86381) && (hash8 == 0x6dd86381) && (hashA == 0x6dd86381))
+    if ((hash0 == filledFFHash) && (hash2 == filledFFHash) && (hash4 != filledFFHash) && (hash4 == hash6) && (hash8 == filledFFHash) && (hashA == filledFFHash))
+    {
+        printf("\n=== 8KB Mirrored ROM Detected ===\n");
+        romInfo->mapperType = MAPPER_NO_MAPPER_16K;
+        romInfo->mapperName = "8KB ROM (Mirrored)";
+        romInfo->romSize = 0x2000;
+        romInfo->validDataStart = 0x4000;
+        romInfo->validDataSize = 0x2000;
+        return TRUE;
+    }
+
+    if ((hash0 == filledFFHash) && (hash2 == filledFFHash) && (hash4 == filledFFHash) && (hash6 == filledFFHash) && (hash8 != filledFFHash) && (hash8 == hashA))
+    {
+        printf("\n=== 8KB Mirrored ROM Detected ===\n");
+        romInfo->mapperType = MAPPER_NO_MAPPER_16K;
+        romInfo->mapperName = "8KB ROM (Mirrored)";
+        romInfo->romSize = 0x2000;
+        romInfo->validDataStart = 0x8000;
+        romInfo->validDataSize = 0x2000;
+        return TRUE;
+    }
+
+    if ((hash0 == filledFFHash) && (hash2 == filledFFHash) && (hash4 != filledFFHash) && (hash6 == filledFFHash) && (hash8 == filledFFHash) && (hashA == filledFFHash))
     {
         printf("\n=== 16KB Standard ROM Detected ===\n");
         romInfo->mapperType = MAPPER_NO_MAPPER_16K;
@@ -1781,7 +1839,7 @@ static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
         return TRUE;
     }
 
-    if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381) && (hash4 != 0x6dd86381) && (hash6 != 0x6dd86381) && (hash8 == 0x6dd86381) && (hashA == 0x6dd86381))
+    if ((hash0 == filledFFHash) && (hash2 == filledFFHash) && (hash4 != filledFFHash) && (hash6 != filledFFHash) && (hash8 == filledFFHash) && (hashA == filledFFHash))
     {
         printf("\n=== 16KB Standard ROM Detected ===\n");
         romInfo->mapperType = MAPPER_NO_MAPPER_16K;
@@ -1792,7 +1850,7 @@ static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
         return TRUE;
     }
 
-    if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381) && (hash4 == 0x6dd86381) && (hash6 == 0x6dd86381) && (hash8 != 0x6dd86381) && (hashA != 0x6dd86381))
+    if ((hash0 == filledFFHash) && (hash2 == filledFFHash) && (hash4 == filledFFHash) && (hash6 == filledFFHash) && (hash8 != filledFFHash) && (hashA != filledFFHash))
     {
         printf("\n=== 16KB Standard ROM Detected ===\n");
         romInfo->mapperType = MAPPER_NO_MAPPER_16K;
@@ -1814,7 +1872,7 @@ static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
         return TRUE;
     }
 
-    if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381) && (hash4 == hash8) && (hash6 == hashA))
+    if ((hash0 == filledFFHash) && (hash2 == filledFFHash) && (hash4 == hash8) && (hash6 == hashA))
     {
         printf("\n=== 16KB Standard ROM Detected ===\n");
         romInfo->mapperType = MAPPER_NO_MAPPER_16K;
@@ -1825,7 +1883,7 @@ static BOOL DetectStandardROM(HANDLE hSerial, ROM_INFO* romInfo)
         return TRUE;
     }
 
-    if ((hash0 == 0x6dd86381) && (hash2 == 0x6dd86381) && (hash4 != hash8) && (hash6 != hashA))
+    if ((hash0 == filledFFHash) && (hash2 == filledFFHash) && (hash4 != hash8) && (hash6 != hashA))
     {
         printf("\n=== 32KB Standard ROM Detected ===\n");
         romInfo->mapperType = MAPPER_NO_MAPPER_16K;

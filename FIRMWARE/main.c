@@ -26,6 +26,7 @@
 //  26/05/20 V1.20      SMTHコマンドの追加、スクリプトのPUSH命令を追加
 //  26/05/20 V1.21      MSX初期のROMカセットではアクセス速度が<180ns以上ものが散見されたので
 //                      読み込みタイミングを調整した
+//  26/05/28 v1.30      BS6101を採用したASCII3 ROMの動作不良対策で書き込み時のRD信号をPushPullに変更
 //
 ////////////////////////////////////////////////////////////////////////
 
@@ -483,10 +484,12 @@ int slotReadData(uint8_t slot, uint16_t address, uint8_t *data) {
     uint32_t slot_data = 0;
     uint32_t rd_mask = 0;
     uint32_t mrq_mask = 0;
+    uint32_t wr_mask = 0;
 
     sltAcc = true;                                 // アクセス開始フラグ立てる
 
     data_mask       = ((uint32_t) 0xff      << 8); // データピンマスク(8bit)
+    wr_mask         = ((uint32_t) 1ULL << 5);      // WR 信号マスク
     rd_mask         = ((uint32_t) 1ULL << 6);     // RD 信号マスク
     mrq_mask        = ((uint32_t) 1ULL << 4);     // MRQ 信号マスク
 
@@ -504,6 +507,7 @@ int slotReadData(uint8_t slot, uint16_t address, uint8_t *data) {
         address_value   = ((uint32_t) address   << 8); // アドレス値
     #endif
 
+    gpioc_hi_oe_set(wr_mask);                       // WRをPushPullに変更する(BS6101対策)
 
     gpiolo_put_masked(address_mask, address_value);  // アドレス出力
     gpiohi_put_masked(mrq_mask, 0x0);               // MRQ LOW (アサート)
@@ -564,6 +568,8 @@ int slotReadData(uint8_t slot, uint16_t address, uint8_t *data) {
 //    busy_wait_at_least_cycles(10);                  // タイミング確保 (約561ns)
     
     gpioc_lo_oe_xor((gpioc_lo_oe_get() ^ (~slot_mask)) & slot_mask); // 現在値と XOR → マスク適用で出力変更
+    gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGH (BS6101対策)(リリース)
+
     busy_wait_at_least_cycles(memWait);             // waitタイミング確保
 
     sltAcc = false;                                 // アクセス終了フラグクリア
@@ -578,14 +584,17 @@ int slotWriteData(uint8_t slot, uint16_t address, uint8_t data) {
     uint32_t data_data = 0;
     uint32_t slot_mask = 0;
     uint32_t slot_data = 0;
+    uint32_t rd_mask = 0;
     uint32_t wr_mask = 0;
     uint32_t mrq_mask = 0;
+
 
     sltAcc = true;                                  // アクセス開始フラグ立てる
 
     data_mask       = ((uint32_t) 0xff      << 8);  // データマスク
     data_data       = ((uint32_t) data      << 8);  // データをシフトして出力用値にする
     wr_mask         = ((uint32_t) 1ULL << 5);      // WR 信号マスク
+    rd_mask         = ((uint32_t) 1ULL << 6);     // RD 信号マスク
     mrq_mask        = ((uint32_t) 1ULL << 4);      // MRQ 信号マスク
     if (powerCheck() != CMD_OK) return CMD_FAIL;   // 電源チェック
     #ifdef PCBVER_B 
@@ -599,7 +608,7 @@ int slotWriteData(uint8_t slot, uint16_t address, uint8_t data) {
         address_mask    = ((uint32_t) 0xffff    << 8); // アドレスマスク
         address_value   = ((uint32_t) address   << 8); // アドレス値
     #endif
-
+    gpioc_hi_oe_set(rd_mask);                       // RDをPushPullに変更する(BS6101対策)
     gpiolo_put_masked(address_mask, address_value);  // アドレス出力
     gpiohi_put_masked(mrq_mask, 0x0);               // MRQ LOW
     gpioc_hi_oe_set(data_mask);                     // データピンを出力にする (OE 設定)
@@ -638,9 +647,11 @@ int slotWriteData(uint8_t slot, uint16_t address, uint8_t data) {
     gpiohi_put_masked(wr_mask, 0x0);                // WR LOW (アサート)
     busy_wait_at_least_cycles(wrWait);                  // タイミング確保 (180ns)
     gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGH (リリース)
+    gpiohi_put_masked(rd_mask, rd_mask);            // RD を解除 (HIGH)
     gpiolo_put_masked(slot_mask, slot_mask);          // スロット選択解除
     gpiohi_put_masked(mrq_mask, mrq_mask);          // MRQ HIGH (リリース)
     gpioc_hi_oe_clr(data_mask);                     // データピンを入力に戻す
+    gpiohi_put_masked(rd_mask, rd_mask);            // RD を解除(BS6101対策) (HIGH)
     busy_wait_at_least_cycles(memWait);             // waitタイミング確保
 
     sltAcc = false;                                 // アクセス終了フラグクリア
@@ -724,7 +735,7 @@ int slotWriteIO(uint16_t address, uint8_t data) {
     busy_wait_at_least_cycles(36);                  // タイミング
     gpiohi_put_masked(wr_mask, 0x0);                // WR LOW
     busy_wait_at_least_cycles(18);                  // タイミング
-    gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGH
+    gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGHsm
     gpiohi_put_masked(io_mask, io_mask);            // IO リリース
     gpioc_hi_oe_clr(data_mask);                     // データピン入力に戻す
 
