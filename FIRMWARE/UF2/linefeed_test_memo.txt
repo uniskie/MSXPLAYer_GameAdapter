@@ -1,0 +1,26 @@
+実験でCRLF出力版のファームウェアを置いときます。（フォークしてブランチ作りました）
+https://github.com/uniskie/MSXPLAYer_GameAdapter/tree/FIRMWARE_CRLF_VER/FIRMWARE/UF2
+
+- SCREEN（WSL2+Ubuntu）
+  - LF(無改造)だと斜め階段
+  - CRだけだと改行せず行頭移動のみで上書き
+  - CRLFだと良好
+
+  → 改行変換無しっぽい
+
+- TeraTerm
+  - 受信 CR
+    - CRだと良好
+    - CR+LFだと1行空行が増える
+    - LF(無改造)だと斜め階段
+  - 受信 CR+LF
+    - CRでもCRLFでも良好
+    - LF(無改造)だと斜め階段
+  - 受信LF
+    - CRだと改行せず頭出しのみ
+    - LF(無改造)だと良好
+
+  → 設定どおりに変換してるっぽい
+
+CR+LF出力がよさそうですが
+改行コードを変えた場合、決め打ちで改行処理してるソフトは困りそうですね

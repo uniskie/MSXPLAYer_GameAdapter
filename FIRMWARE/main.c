@@ -75,6 +75,17 @@
 //#define HW_NAME     "ILF ROM Cassette Reader V2" // ハード名
 #define HW_NAME     "ILF ROM Cassette Reader V2" // ハード名
 
+// 改行コード 使い分け
+// target_compile_definitionで
+//  PICO_STDIO_CRLF_SUPPORTED=0
+//  PICO_STDIO_UART_DEFAULT_CRLF=0
+//  PICO_STDIO_USB_DEFAULT_CRLF=0
+// が前提
+#define LF   "\n"    // LF (0x0A) 
+#define CR   "\r"    // CR (0x0D) 
+#define CRLF "\r\n"  // CR + LF (0x0D 0x0A)
+#define NL   CRLF
+
 // Hardware Infomation
 #define HWINFO_SLOTNUM          1           // スロット数
 #define HWINFO_POWERCTRL        1           // SLOT Power Control          (0無/1有)
@@ -746,16 +757,16 @@ int slotWriteIO(uint16_t address, uint8_t data) {
 
 // GPIOテストシーケンス（すべてのテスト処理を1つの関数にまとめ）
 int gpio_test_sequence(void) {
-    cdc_printf("\n========================================\n");
-    cdc_printf("Factory GPIO Test Started\n");
-    cdc_printf("========================================\n\n");
+    cdc_printf(NL "========================================" NL);
+    cdc_printf("Factory GPIO Test Started" NL);
+    cdc_printf("========================================" NL NL);
 
     sltPower = true;                                       // 電源 ON フラグ
     SlotPowerON();
     busy_wait_ms(5);
 
     // ステップ1: GPIO7-47をすべて入力に設定
-    cdc_printf("Switch GPIO7-47 to input mode...\n");
+    cdc_printf("Switch GPIO7-47 to input mode..." NL);
     for (uint pin = 7; pin <= 47; pin++) {
         // GPIO28-30は除外
         if (pin >= 28 && pin <= 30) {
@@ -764,7 +775,7 @@ int gpio_test_sequence(void) {
         gpio_init(pin);
         gpio_set_dir(pin, GPIO_IN);
     }
-    cdc_printf("Complete\n\n");
+    cdc_printf("Complete" NL NL);
     busy_wait_ms(10);
     
     // GPIO組み合わせごとにテスト実行
@@ -772,56 +783,56 @@ int gpio_test_sequence(void) {
         uint pin_out = gpio_pairs[i].gpio_out;
         uint pin_check = gpio_pairs[i].gpio_check;
         
-        cdc_printf("========================================\n");
-        cdc_printf("Test %d/%d: GPIO%d-GPIO%d\n", i + 1, NUM_GPIO_PAIRS, pin_out, pin_check);
-        cdc_printf("========================================\n");
+        cdc_printf("========================================" NL);
+        cdc_printf("Test %d/%d: GPIO%d-GPIO%d" NL, i + 1, NUM_GPIO_PAIRS, pin_out, pin_check);
+        cdc_printf("========================================" NL);
         
         // ステップ2: GPIO7-47がすべて1であることを確認
-        cdc_printf("Verify all GPIO7-47 are high (1)...\n");
+        cdc_printf("Verify all GPIO7-47 are high (1)..." NL);
         bool all_high = true;
         for (uint pin = 7; pin <= 47; pin++) {
             if (pin >= 28 && pin <= 30) {
                 continue;
             }
             if (!gpio_get(pin)) {
-                cdc_printf("Error: GPIO%d = 0 (Expected: 1)\n", pin);
+                cdc_printf("Error: GPIO%d = 0 (Expected: 1)" NL, pin);
                 all_high = false;
                 break;
             }
         }
         
         if (!all_high) {
-            cdc_printf("Test %d Failed: Step 2\n\n", i + 1);
+            cdc_printf("Test %d Failed: Step 2" NL NL, i + 1);
             return CMD_FAIL;
         }
-        cdc_printf("Complete: All GPIO are high\n");
+        cdc_printf("Complete: All GPIO are high" NL);
         busy_wait_ms(50);
         
         // ステップ3: GPIO出力を0に設定
-        cdc_printf("Switch GPIO%d to output mode and set to 0...\n", pin_out);
+        cdc_printf("Switch GPIO%d to output mode and set to 0..." NL, pin_out);
         gpio_init(pin_out);
         gpio_set_dir(pin_out, GPIO_OUT);
         gpio_put(pin_out, 0);
         busy_wait_ms(5);
         
         if (gpio_get(pin_out) != 0) {
-            cdc_printf("Error: GPIO%d output value is not 0\n", pin_out);
-            cdc_printf("Test %d Failed: Step 3\n\n", i + 1);
+            cdc_printf("Error: GPIO%d output value is not 0" NL, pin_out);
+            cdc_printf("Test %d Failed: Step 3" NL NL, i + 1);
             return CMD_FAIL;
         }
-        cdc_printf("GPIO%d = 0 Set Complete\n", pin_out);
+        cdc_printf("GPIO%d = 0 Set Complete" NL, pin_out);
 //        busy_wait_ms(50);
         
         // ステップ4: GPIO checkが0であることを確認、それ以外が1であることを確認
-        cdc_printf("Verify GPIO%d is low (0)...\n", pin_check);
+        cdc_printf("Verify GPIO%d is low (0)..." NL, pin_check);
         if (gpio_get(pin_check) != 0) {
-            cdc_printf("Error: GPIO%d Expected: 0 (Actual: 1)\n", pin_check);
-            cdc_printf("Test %d Failed: Step 4-1\n\n", i + 1);
+            cdc_printf("Error: GPIO%d Expected: 0 (Actual: 1)" NL, pin_check);
+            cdc_printf("Test %d Failed: Step 4-1" NL, i + 1);
             return CMD_FAIL;
         }
-        cdc_printf("GPIO%d = 0 Verified\n", pin_check);
+        cdc_printf("GPIO%d = 0 Verified" NL, pin_check);
         
-        cdc_printf("Verify GPIO%d, GPIO%d and others are high (1)...\n", pin_out, pin_check);
+        cdc_printf("Verify GPIO%d, GPIO%d and others are high (1)..." NL, pin_out, pin_check);
         bool other_all_high = true;
         for (uint pin = 7; pin <= 47; pin++) {
             if (pin >= 28 && pin <= 30) {
@@ -831,38 +842,38 @@ int gpio_test_sequence(void) {
                 continue;
             }
             if (!gpio_get(pin)) {
-                cdc_printf("[STEP 4] Error: GPIO%d = 0 (Expected: 1)\n", pin);
+                cdc_printf("[STEP 4] Error: GPIO%d = 0 (Expected: 1)" NL, pin);
                 other_all_high = false;
                 break;
             }
         }
         
         if (!other_all_high) {
-            cdc_printf("Test %d Failed: Step 4-2\n\n", i + 1);
+            cdc_printf("Test %d Failed: Step 4-2" NL, i + 1);
             return CMD_FAIL;;
         }
-        cdc_printf("GPIO%d, GPIO%d and others all high verified\n", pin_out, pin_check);
+        cdc_printf("GPIO%d, GPIO%d and others all high verified" NL, pin_out, pin_check);
 //      busy_wait_ms(50);
         
         // ステップ5: GPIO出力を入力に切り替え
-        cdc_printf("Switch GPIO%d to input mode...\n", pin_out);
+        cdc_printf("Switch GPIO%d to input mode..." NL, pin_out);
         gpio_init(pin_out);
         gpio_set_dir(pin_out, GPIO_IN);
-        cdc_printf("Complete\n");
-        cdc_printf("Test %d: Success\n\n", i + 1);
+        cdc_printf("Complete" NL);
+        cdc_printf("Test %d: Success" NL NL, i + 1);
 //        busy_wait_ms(100);
     }
     
     // ステップ6: LED & Current Sensor Check
-    cdc_printf("========================================\n");
-    cdc_printf("LED & Current Sensor Check\n");
-    cdc_printf("-- Push OverCurrent SW--\n");
-    cdc_printf("========================================\n");
+    cdc_printf("========================================" NL);
+    cdc_printf("LED & Current Sensor Check" NL);
+    cdc_printf("-- Push OverCurrent SW--" NL);
+    cdc_printf("========================================" NL);
     
     uint16_t color_progress = 0;
 
     // ステップ7: overCurrent == true かつ sltPower == false まで待機
-    cdc_printf("Changing LED to rainbow colors, waiting for check...\n");
+    cdc_printf("Changing LED to rainbow colors, waiting for check..." NL);
     while (!(overCurrent && !sltPower)) {
         set_led_smooth_color(color_progress);
         color_progress++;
@@ -870,16 +881,16 @@ int gpio_test_sequence(void) {
         
         // タイムアウト防止（シミュレーション用）
         if (color_progress > 40000) {
-            cdc_printf("Timeout: Condition not met\n");
+            cdc_printf("Timeout: Condition not met" NL);
             return CMD_FAIL;
         }
     }
-    cdc_printf("Complete\n");
+    cdc_printf("Complete" NL);
     
     // ステップ8: テスト終了を表示
-    cdc_printf("\n========================================\n");
-    cdc_printf("ALL Test Finished (PASS) \n");
-    cdc_printf("========================================\n");
+    cdc_printf(NL "========================================" NL);
+    cdc_printf("ALL Test Finished (PASS) " NL);
+    cdc_printf("========================================" NL);
 
     SlotPowerOFF();
     sltPower = false;
@@ -907,7 +918,7 @@ int cmd_slotPowerOn(const Command_t* cmd) {
 
 //        gpio_put(2, ~HWINFO_PWREN);         //CH217K EN# LOW                        // 電源制御 EN を Low に (ON)
 //        gpio_put(2, 1);                                     // 異常時は EN を HIGH にして電源 OFF
-        cdc_printf("Power ON Fail...\n");                      // 通知
+        cdc_printf("Power ON Fail..." NL);                      // 通知
         return CMD_FAIL;        
     };
     #endif
@@ -1305,32 +1316,32 @@ int parse_hex_string(const char *s, int *val) {
 }
 
 int cmd_hwVersion(const Command_t* cmd) {
-   cdc_printf("%s\n%s\n",HW_NAME,HW_VERSION);      // ハード名/バージョン出力
-   cdc_printf("FIRMWARE DATE\n%s\n",__DATE__);     // ビルド日付出力
+   cdc_printf("%s" NL "%s" NL,HW_NAME,HW_VERSION);      // ハード名/バージョン出力
+   cdc_printf("FIRMWARE DATE" NL "%s" NL,__DATE__);     // ビルド日付出力
    return CMD_OK;                                  // 成功
 }
 // HW information              	HINF	cmd_hwInfomation    	HINF                                            	戻値: Hardware 情報   + OK    	Hardware Information
 int cmd_hwInfomation(const Command_t* cmd) {
-   cdc_printf("SLOTNUM,%d\n",HWINFO_SLOTNUM);      // スロット数出力
-   cdc_printf("SLOTPHY,%d\n",HWINFO_SLOTPHY);      // 基本スロットの物理割り付け情報
-   cdc_printf("POWERCTRL,%d\n",HWINFO_POWERCTRL);  // 電源制御有無出力
-   cdc_printf("CURRENTSENSOR,%d\n",HWINFO_CURRENTSENSOR); // 電流センサ有無
-   cdc_printf("PWR12V,%d\n",HWINFO_PWR12V);        // 12V 電源有無
-   cdc_printf("SLOTCLOCK,%d\n",HWINFO_SLOTCLOCK);  // スロットクロック供給有無
-   cdc_printf("LINEOUT,%d\n",HWINFO_LINEOUT);      // LineOut 有無
-   cdc_printf("PSGUNIT,%d\n",HWINFO_PSGUNIT);      // PSG ユニット有無
-   cdc_printf("LFCR,%d\n",crlfFlag);               // CRLF フラグ出力
-   cdc_printf("COMDBG,%d\n",comdbgFlag);           // シリアルポートに対するデバッグ出力フラグ
-   cdc_printf("SCRLOOP,%d\n",cmpLoopMax);          // スクリプトのLOOP回数
-   cdc_printf("MEMWAIT,%d\n",memWait);          // Memory アクセスWait CMDtoCMD
-   cdc_printf("RDWAIT,%d\n",rdWait);          // Memory アクセスWait Read
-   cdc_printf("WRWAIT,%d\n",wrWait);          // Memory アクセスWait Write
-   cdc_printf("P6MODDE,%d\n",p6_16kbMode);          // PC6001 mode flag
+   cdc_printf("SLOTNUM,%d"NL,HWINFO_SLOTNUM);      // スロット数出力
+   cdc_printf("SLOTPHY,%d"NL,HWINFO_SLOTPHY);      // 基本スロットの物理割り付け情報
+   cdc_printf("POWERCTRL,%d"NL,HWINFO_POWERCTRL);  // 電源制御有無出力
+   cdc_printf("CURRENTSENSOR,%d"NL,HWINFO_CURRENTSENSOR); // 電流センサ有無
+   cdc_printf("PWR12V,%d"NL,HWINFO_PWR12V);        // 12V 電源有無
+   cdc_printf("SLOTCLOCK,%d"NL,HWINFO_SLOTCLOCK);  // スロットクロック供給有無
+   cdc_printf("LINEOUT,%d"NL,HWINFO_LINEOUT);      // LineOut 有無
+   cdc_printf("PSGUNIT,%d"NL,HWINFO_PSGUNIT);      // PSG ユニット有無
+   cdc_printf("LFCR,%d"NL,crlfFlag);               // CRLF フラグ出力
+   cdc_printf("COMDBG,%d"NL,comdbgFlag);           // シリアルポートに対するデバッグ出力フラグ
+   cdc_printf("SCRLOOP,%d"NL,cmpLoopMax);          // スクリプトのLOOP回数
+   cdc_printf("MEMWAIT,%d"NL,memWait);          // Memory アクセスWait CMDtoCMD
+   cdc_printf("RDWAIT,%d"NL,rdWait);          // Memory アクセスWait Read
+   cdc_printf("WRWAIT,%d"NL,wrWait);          // Memory アクセスWait Write
+   cdc_printf("P6MODDE,%d"NL,p6_16kbMode);          // PC6001 mode flag
    return CMD_OK;
 }
 
 int null_format(const Command_t* cmd) {
-    cdc_printf("NULL [%s] [%s] [%x][%x][%x][%x]\n", cmd->cmd,cmd->arg, cmd->arg_val[0],cmd->arg_val[1],cmd->arg_val[2],cmd->arg_val[3]); // デバッグ出力
+    cdc_printf("NULL [%s] [%s] [%x][%x][%x][%x]"NL, cmd->cmd,cmd->arg, cmd->arg_val[0],cmd->arg_val[1],cmd->arg_val[2],cmd->arg_val[3]); // デバッグ出力
     return 0;
 }
 
@@ -1367,7 +1378,7 @@ int cmd_hset(const Command_t* cmd) {
 
 // HW Status                   	HSTS	cmd_hwIntenalStatus 	HSTS                                            	戻値: 内部STATUS  + OK        	SlotのCMD実行状態を表示
 int cmd_hwIntenalStatus(const Command_t* cmd) {
-   cdc_printf("%d\n",count-1);                     // キュー残数表示 (自明ではないので注意)
+   cdc_printf("%d"NL,count-1);                     // キュー残数表示 (自明ではないので注意)
    if (errCount != 0) return CMD_FAIL;             // エラーありなら FAIL を返す
    return CMD_OK;
 }
@@ -1451,7 +1462,7 @@ int cmd_bufDump(const Command_t* cmd) {
                 cdc_printf(" ");
             }
         }
-        if (i < DATABUF_SIZE) cdc_printf("\n"); // 行末改行
+        if (i < DATABUF_SIZE) cdc_printf(NL); // 行末改行
     }
     return CMD_OK;
 }
@@ -1481,7 +1492,7 @@ int cmd_slotWriteMem(const Command_t* cmd) {
 
     slot = slotVaild(cmd->arg_val[2]);
     if (slot == 0) return CMD_FAIL;                         // スロット不正
-    if (displayFlag == true) cdc_printf("%04x : %02x\n",address,data);               // デバッグ出力
+    if (displayFlag == true) cdc_printf("%04x : %02x"NL,address,data);               // デバッグ出力
     if (slotWriteData(slot, address, data) != CMD_OK) return CMD_FAIL; // 実書き込み
     return CMD_OK;
 }
@@ -1499,7 +1510,7 @@ int cmd_slotReadMem(const Command_t* cmd) {
     if (slot == 0) return CMD_FAIL;
 
     if (slotReadData(slot, address, &data) != CMD_OK) return CMD_FAIL; // 実読出し
-    cdc_printf("%04x : %02x\n",address,data);               // 出力
+    cdc_printf("%04x : %02x"NL,address,data);               // 出力
     return CMD_OK;
 }
 
@@ -1542,7 +1553,7 @@ int cmd_slotDump(const Command_t* cmd) {
                 cdc_printf(" ");
             }
         }
-        if (i < DATABUF_SIZE) cdc_printf("\n"); // 行末改行
+        if (i < DATABUF_SIZE) cdc_printf(NL); // 行末改行
     }
     return CMD_OK;
 }
@@ -1710,17 +1721,17 @@ int cmd_slotCassetteCheck(const Command_t* cmd) {
 #if HWINFO_SLOTNUM==1 
 //Rev B2-
     data = ((gpioc_lo_in_get() & 0x00000020) >> 5); // GPIO の該当ビットを抽出
-    if (data == 1) cdc_printf("0000\n");
-    if (data == 0) cdc_printf("0010\n");
+    if (data == 1) cdc_printf("0000"NL);
+    if (data == 0) cdc_printf("0010"NL);
 #endif
 
 #if HWINFO_SLOTNUM==2 
 //Rev B2-
     data = ((gpioc_lo_in_get() & 0x00000020) >> 5); // GPIO の該当ビットを抽出
-    if (data == 3) cdc_printf("0000\n"); // 接続状態パターン出力
-    if (data == 2) cdc_printf("0010\n");
-    if (data == 1) cdc_printf("0100\n");
-    if (data == 0) cdc_printf("0110\n");
+    if (data == 3) cdc_printf("0000"NL); // 接続状態パターン出力
+    if (data == 2) cdc_printf("0010"NL);
+    if (data == 1) cdc_printf("0100"NL);
+    if (data == 0) cdc_printf("0110"NL);
 #endif
 
 
@@ -1755,7 +1766,7 @@ int cmd_host2buf(const Command_t* cmd) {
 
 // Move2Boot Mode    	_FFU	cmd_ffuMode        	FFUON            	戻値: 無し       	Bootloaderを起動します。
 int cmd_ffuMode(const Command_t* cmd) {
-    cdc_printf("Move to Boot mode after 3Sec.\nBye...\n"); // 通知
+    cdc_printf("Move to Boot mode after 3Sec.\nBye..."NL); // 通知
     busy_wait_ms(3000);                                       // 3秒待機
     reset_usb_boot(REBOOT2_FLAG_REBOOT_TYPE_NORMAL ,0);       // Bootloader 起動
     return CMD_OK;
@@ -1772,7 +1783,7 @@ int cmd_ioWrite(const Command_t* cmd) {
     if (cmd->arg_val[1] == -1)  return CMD_FAIL;            // データ必須
     data = (uint8_t) cmd->arg_val[1];
 
-    if (displayFlag == true) cdc_printf("%04x : %02x\n",address,data);               // デバッグ出力
+    if (displayFlag == true) cdc_printf("%04x : %02x"NL,address,data);               // デバッグ出力
     if (slotWriteIO(address, data) != CMD_OK) return CMD_FAIL; // 実 IO 書き込み
     return CMD_OK;
 }
@@ -1786,7 +1797,7 @@ int cmd_ioRead(const Command_t* cmd) {
     address = (uint16_t)cmd->arg_val[0];
 
     if (slotReadIO(address, &data) != CMD_OK) return CMD_FAIL; // 実 IO 読み出し
-    cdc_printf("%04x : %02x\n",address,data);                   // 出力
+    cdc_printf("%04x : %02x"NL,address,data);                   // 出力
     return CMD_OK;
 }
 
@@ -1805,8 +1816,8 @@ int cmd_err_displayOff(const Command_t* cmd) {
 
 // DISPON　CMD後のOK表示無し
 int cmd_err_displayOn(const Command_t* cmd) {
-    cdc_printf("PASS : %d\n",passCount);   // PASS 表示
-    cdc_printf("FAIL : %d\n",errCount);    // FAIL 表示
+    cdc_printf("PASS : %d"NL,passCount);   // PASS 表示
+    cdc_printf("FAIL : %d"NL,errCount);    // FAIL 表示
     passCount = 0;                         // カウントリセット
     displayFlag = true;                    // 表示 ON
     if (errCount != 0){
@@ -1860,7 +1871,7 @@ int cmd_slotReadTransferWithHash(const Command_t* cmd) {
         hash = ((hash << 5) + hash) ^ data;
         slotAddress++;                         // スロット側アドレスインクリメント
     }
-    cdc_printf("%04x : %08x\n",length,hash);   // データサイズとHash値出力
+    cdc_printf("%04x : %08x"NL,length,hash);   // データサイズとHash値出力
     return CMD_OK;
 }
 
@@ -1926,10 +1937,10 @@ void core1_entry() {
                         int cmd_err = cmd_table[i].func((const Command_t *)&commandBufs[read_idx]); // 実行
                         if (displayFlag){
 //                            printf("C:%s R:%d %02x %02x\n",commandBufs[read_idx].cmd,cmd_err,slotMem[0],slotMem[1]); //debugd
-                            if (cmd_err == CMD_OK)  cdc_printf("OK\n"); // 成功表示
-                            else if (cmd_err == CMD_FAIL) cdc_printf("FAIL\n"); // 失敗表示
-                            else if (cmd_err == CMD_BADPARM) cdc_printf("Bad Parameter\n"); // bad param
-                            else if (cmd_err == CMD_UNKNOW) cdc_printf("Unknow Error\n"); // unknown
+                            if (cmd_err == CMD_OK)  cdc_printf("OK"NL); // 成功表示
+                            else if (cmd_err == CMD_FAIL) cdc_printf("FAIL"NL); // 失敗表示
+                            else if (cmd_err == CMD_BADPARM) cdc_printf("Bad Parameter"NL); // bad param
+                            else if (cmd_err == CMD_UNKNOW) cdc_printf("Unknow Error"NL); // unknown
                         }else{
                             if (cmd_err == CMD_OK)  passCount++; // 表示OFF時はカウントのみ
                             else errCount++;
@@ -1939,7 +1950,7 @@ void core1_entry() {
                     }
                 }
                 if(!dispatched)
-                    cdc_printf("Unknown command: [%s]\n", commandBufs[read_idx].cmd); // 未登録コマンド
+                    cdc_printf("Unknown command: [%s]"NL, commandBufs[read_idx].cmd); // 未登録コマンド
             }
             mutex_enter_blocking(&cmdcount_mutex);
             commandBufs[read_idx].valid = false;        // 使用済みにする
@@ -1967,6 +1978,11 @@ int main(void)
     stdio_init_all();                                // stdio を USB CDC にルーティング (可能なら)
 
     init_all_pins();                                 // GPIO を全初期化 (ports.c の配列を使用)
+
+     // 標準出力のバッファリングを無効化する
+     // 改行コードを任意の物に変更した場合
+     // 改行コード依存のバッファフラッシュでは問題がでる可能性があるため
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     pio_gpio_init(pio, CLOCK_PIN);
     gpio_disable_pulls(CLOCK_PIN);
@@ -2225,7 +2241,7 @@ void tud_cdc_rx_cb(uint8_t itf)
 
                         }
                     } else {
-                        cdc_printf("Buffer full! Dropped: %s\r\n", lineBuf); // キュー満杯時の通知
+                        cdc_printf("Buffer full! Dropped: %s"CRLF, lineBuf); // キュー満杯時の通知
                     }
                     lineLen = 0; // 行バッファクリア
                 }
