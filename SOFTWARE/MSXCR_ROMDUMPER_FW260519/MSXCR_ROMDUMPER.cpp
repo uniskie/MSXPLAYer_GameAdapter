@@ -42,6 +42,7 @@ typedef enum {
     MAPPER_GENERIC_16K,             // Generic 16K
     MAPPER_GENERIC_8K,              // Generic 8K
     MAPPER_RTYPE,                   // R-Type
+    MAPPER_CROSSBLAM,               // CROSS BLAM
     MAPPER_HARRYFOX,                // HARRY FOX
     MAPPER_FMPAC,                   // FMPAC
     MAPPER_HALNOTE,                 // Hal Note
@@ -1618,6 +1619,9 @@ static BOOL DetectRType(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
     if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashA[3])) return FALSE;
 
+    // ページ2バンク0x0Fがページ1と同じ内容であることを確認
+    if ((hashA[0] != hashA[2]) || (hashA[1] != hashA[3])) return FALSE;
+
     memcpy(prevHashA, hashA, sizeof(hashA));
 
     if (!slotWrite(hSerial, 0x6000, 0x01)) return FALSE;
@@ -1628,6 +1632,7 @@ static BOOL DetectRType(HANDLE hSerial, ROM_INFO* romInfo)
     if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
     if (!slotReadHash(hSerial, 0xa000, HASH_SIZE, &hashB[3])) return FALSE;
 
+    // ページ1は固定で、ページ2の0x0Fと0x1Fと同じ内容であることを確認
     if ((hashA[0] != hashB[0]) || (hashA[1] != hashB[1]) || (hashA[2] != hashB[2]) || (hashA[3] != hashB[3])) return FALSE;
 
     if (!slotWrite(hSerial, 0x6800, 0x00)) return FALSE;
@@ -1653,6 +1658,74 @@ static BOOL DetectRType(HANDLE hSerial, ROM_INFO* romInfo)
     }
 
     return FALSE;
+}
+
+static BOOL DetectCrossBlam(HANDLE hSerial, ROM_INFO* romInfo)
+{
+    printf("--- Testing Cross Blam ---\n");
+
+    DWORD hashA[4], hashB[04], hashC[4];
+
+    if (!slotWrite(hSerial, 0x6000, 0x00)) return FALSE;
+    if (!slotWrite(hSerial, 0x7000, 0x01)) return FALSE;
+
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashA[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashA[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashA[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xA000, HASH_SIZE, &hashA[3])) return FALSE;
+
+    if (!slotWrite(hSerial, 0x6000, 0x02)) return FALSE;
+    if (!slotWrite(hSerial, 0x7000, 0x02)) return FALSE;
+
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashB[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashB[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashB[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xA000, HASH_SIZE, &hashB[3])) return FALSE;
+
+    if ((hashA[0] != hashB[0]) || (hashA[1] != hashB[1]) || (hashA[2] == hashB[2]) || (hashA[3] == hashB[3]))
+        return FALSE;
+
+    if (!slotWrite(hSerial, 0x6000, 0x01)) return FALSE;
+    if (!slotWrite(hSerial, 0x7000, 0x03)) return FALSE;
+
+    if (!slotReadHash(hSerial, 0x4000, HASH_SIZE, &hashC[0])) return FALSE;
+    if (!slotReadHash(hSerial, 0x6000, HASH_SIZE, &hashC[1])) return FALSE;
+    if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &hashC[2])) return FALSE;
+    if (!slotReadHash(hSerial, 0xA000, HASH_SIZE, &hashC[3])) return FALSE;
+
+    if ((hashA[0] != hashC[0]) || (hashA[1] != hashC[1]) || (hashB[2] == hashC[2]) || (hashB[3] == hashC[3]))
+        return FALSE;
+
+    DWORD expectedHash[4][2] = {
+        { hashA[2], hashA[3] },
+        { hashA[2], hashA[3] },
+        { hashB[2], hashB[3] },
+        { hashC[2], hashC[3] }
+    };
+
+    for (DWORD bank = 0; bank < 8; bank++)
+    {
+        if (!slotWrite(hSerial, 0x7FFF, (BYTE)bank)) return FALSE;
+
+        DWORD h2, h3;
+        if (!slotReadHash(hSerial, 0x8000, HASH_SIZE, &h2)) return FALSE;
+        if (!slotReadHash(hSerial, 0xA000, HASH_SIZE, &h3)) return FALSE;
+
+        DWORD idx = bank % 4;
+        if ((h2 != expectedHash[idx][0]) || (h3 != expectedHash[idx][1]))
+            return FALSE;
+    }
+
+    printf("\n=== Cross Blam ROM Detected ===\n");
+    romInfo->mapperType = MAPPER_CROSSBLAM;
+    romInfo->mapperName = "CROSS BLAM (page1:fix + page2:bank)";
+    romInfo->bankCount = 0x4;
+    romInfo->romSize = romInfo->bankCount * 0x4000;
+    romInfo->readBankSize = 0x4000;
+    romInfo->readAreaStart = 0x4000;
+    romInfo->readAreaSize = 0x8000;
+    printf("Bank count: %lu, ROM size: %lu (0x%lX)\n", romInfo->bankCount, romInfo->romSize, romInfo->romSize);
+    return TRUE;
 }
 
 static BOOL DetectHarryFox(HANDLE hSerial, ROM_INFO* romInfo)
@@ -2118,6 +2191,46 @@ static BOOL ReadRType(HANDLE hSerial, ROM_INFO* romInfo, BYTE* outData)
     return TRUE;
 }
 
+static BOOL ReadCrossBlam(HANDLE hSerial, ROM_INFO* romInfo, BYTE* outData)
+{
+    printf("=== Reading Cross Blam ROM ===\n\n");
+
+    BYTE buffer[0x4000];
+    DWORD bytesWritten = 0;
+    DWORD fixedSize = romInfo->readAreaSize - romInfo->readBankSize;
+
+    _ASSERT(sizeof(buffer) >= fixedSize);
+    _ASSERT(sizeof(buffer) >= romInfo->readBankSize);
+
+    for (DWORD bank = 0; bank < romInfo->bankCount; bank++)
+    {
+        if (!slotWrite(hSerial, 0x7000, (BYTE)bank)) return FALSE;
+
+        DWORD readAreaStart = romInfo->readAreaStart;
+        DWORD readAreaSize = fixedSize;
+
+        if (bank != 0)
+        {
+            readAreaStart += fixedSize;
+            readAreaSize = romInfo->readBankSize;
+        }
+
+        if (!slotDump(hSerial, readAreaStart, readAreaSize, buffer))
+        {
+            printf("Failed to read bank %lu\n", bank);
+            return FALSE;
+        }
+
+        memcpy(outData + bytesWritten, buffer, readAreaSize);
+        bytesWritten += readAreaSize;
+
+        printf("Saved bank %lu (0x%04lX - 0x%04lX)\n", bank, bytesWritten - readAreaSize, bytesWritten - 1);
+    }
+
+    printf("\nTotal bytes read: %lu (0x%lX)\n", bytesWritten, bytesWritten);
+    return TRUE;
+}
+
 static BOOL ReadHarryFox(HANDLE hSerial, ROM_INFO* romInfo, BYTE* outData)
 {
     printf("=== Reading Harry Fox -Yuki no Maou- ROM ===\n\n");
@@ -2215,6 +2328,8 @@ static BOOL ReadCompleteROM(HANDLE hSerial, ROM_INFO* romInfo, BYTE* outData)
         return ReadGeneric8K(hSerial, romInfo, outData);
     case MAPPER_RTYPE:
         return ReadRType(hSerial, romInfo, outData);
+    case MAPPER_CROSSBLAM:
+        return ReadCrossBlam(hSerial, romInfo, outData);
     case MAPPER_HARRYFOX:
         return ReadHarryFox(hSerial, romInfo, outData);
     case MAPPER_HALNOTE:
@@ -2280,6 +2395,8 @@ static BOOL DetectMapper(HANDLE hSerial, ROM_INFO* romInfo)
     if (DetectGeneric8K(hSerial, romInfo))
         return TRUE;
     if (DetectRType(hSerial, romInfo))
+        return TRUE;
+    if (DetectCrossBlam(hSerial, romInfo))
         return TRUE;
     if (DetectHarryFox(hSerial, romInfo))
         return TRUE;
@@ -2794,7 +2911,7 @@ int ProcessROMRead(const wchar_t* outputFileArg, bool autoFileNameMode)
             continue;
         }
 
-        ROM_INFO romInfo = { 0 };
+        ROM_INFO romInfo = { MAPPER_UNKNOWN };
         if (!DetectMapper(hSerial, &romInfo))
         {
             printf("Mapper detection failed\n\n");
