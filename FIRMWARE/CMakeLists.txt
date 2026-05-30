@@ -76,6 +76,8 @@ target_link_libraries(MSXPLAYer_CR
 pico_enable_stdio_uart(MSXPLAYer_CR 1)
 pico_add_extra_outputs(MSXPLAYer_CR)
 
+string(TIMESTAMP BUILD_DATE "%Y%m%d%H%M") 
+
 # add url via pico_set_program_url
 target_link_options(${PROJECT_NAME} PRIVATE -Wl,-Map=${PROJECT_NAME}.map)
 target_link_options(${PROJECT_NAME} PRIVATE -Wl,--print-memory-usage)
@@ -83,4 +85,5 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
   PICO_DEFAULT_UART=0 # UART0なら0, UART1なら1
   PICO_DEFAULT_UART_TX_PIN=0 # TXピンのGP番号
   PICO_DEFAULT_UART_RX_PIN=1 # RXピンのGP番号
+  PROJECT_VERSION="${BUILD_DATE}"
 )

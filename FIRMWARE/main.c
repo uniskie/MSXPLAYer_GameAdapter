@@ -72,6 +72,8 @@
 #include "commands.h"                           // 別ファイルに分割したコマンドテーブル // commands.c 参照
 #include "ports.h"                              // 別ファイルに分割したボードピン定義 // ports.c 参照
 
+#include "build_date.h"                         // 自動生成される日付定義ファイル
+
 //#define HW_NAME     "ILF ROM Cassette Reader V2" // ハード名
 #define HW_NAME     "ILF ROM Cassette Reader V2" // ハード名
 
@@ -1306,7 +1308,7 @@ int parse_hex_string(const char *s, int *val) {
 
 int cmd_hwVersion(const Command_t* cmd) {
    cdc_printf("%s\n%s\n",HW_NAME,HW_VERSION);      // ハード名/バージョン出力
-   cdc_printf("FIRMWARE DATE\n%s\n",__DATE__);     // ビルド日付出力
+   cdc_printf("FIRMWARE DATE\n%s\n",PROJECT_VERSION);   // ビルド日付出力
    return CMD_OK;                                  // 成功
 }
 // HW information              	HINF	cmd_hwInfomation    	HINF                                            	戻値: Hardware 情報   + OK    	Hardware Information
@@ -2001,7 +2003,7 @@ int main(void)
 //    enable_clock();
 
     printf("\nMSXPlayer Game Card Adapter for RP2350\nCopyright @v9938\n"); // 起動画面
-    printf("Release Data: %s\n\n",__DATE__);
+    printf("Release Data: %s\n\n",PROJECT_VERSION);
 
     printf("Ready to Command\n");                     // 準備完了表示
     // main run loop
