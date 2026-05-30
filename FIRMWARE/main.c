@@ -1304,9 +1304,48 @@ int parse_hex_string(const char *s, int *val) {
     return 0;                                       // それ以外は失敗
 }
 
+#if (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BIG_ENDIAN)
+    #define MAKE_DATE_INT(c0, c1, c2) (((unsigned int)(c0) << 16) | ((unsigned int)(c1) << 8) | (unsigned int)(c2))
+#else
+    #define MAKE_DATE_INT(c0, c1, c2) (((unsigned int)(c2) << 16) | ((unsigned int)(c1) << 8) | (unsigned int)(c0))
+#endif
+
+static inline int getBuildYear(void) {
+    const char *d = __DATE__;
+    return (d[7]-'0')*1000 + (d[8]-'0')*100 + (d[9]-'0')*10 + (d[10]-'0');
+}
+
+static inline int getBuildDay(void) {
+    const char *d = __DATE__;
+    return ((d[4] == ' ') ? 0 : (d[4]-'0')*10) + (d[5]-'0');
+}
+
+static inline int getBuildMonth(void) {
+    const char *m = __DATE__;
+    
+    // メモリ上の最初の3バイトを、現在のエンディアンに合わせた符号なし整数として安全にキャスト
+    unsigned int val = *(const unsigned int*)m & 0x00FFFFFF;
+
+    switch (val) {
+        case MAKE_DATE_INT('J', 'a', 'n'): return 1;
+        case MAKE_DATE_INT('F', 'e', 'b'): return 2;
+        case MAKE_DATE_INT('M', 'a', 'r'): return 3;
+        case MAKE_DATE_INT('A', 'p', 'r'): return 4;
+        case MAKE_DATE_INT('M', 'a', 'y'): return 5;
+        case MAKE_DATE_INT('J', 'u', 'n'): return 6;
+        case MAKE_DATE_INT('J', 'u', 'l'): return 7;
+        case MAKE_DATE_INT('A', 'u', 'g'): return 8;
+        case MAKE_DATE_INT('S', 'e', 'p'): return 9;
+        case MAKE_DATE_INT('O', 'c', 't'): return 10;
+        case MAKE_DATE_INT('N', 'o', 'v'): return 11;
+        case MAKE_DATE_INT('D', 'e', 'c'): return 12;
+        default: return 0;
+    }
+}
+
 int cmd_hwVersion(const Command_t* cmd) {
    cdc_printf("%s\n%s\n",HW_NAME,HW_VERSION);      // ハード名/バージョン出力
-   cdc_printf("FIRMWARE DATE\n%s\n",__DATE__);     // ビルド日付出力
+   cdc_printf("FIRMWARE DATE\n%04d/%02d/%02d\n",getBuildYear(), getBuildMonth(), getBuildDay());     // ビルド日付出力
    return CMD_OK;                                  // 成功
 }
 // HW information              	HINF	cmd_hwInfomation    	HINF                                            	戻値: Hardware 情報   + OK    	Hardware Information
