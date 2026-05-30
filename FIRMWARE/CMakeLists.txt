@@ -76,6 +76,8 @@ target_link_libraries(MSXPLAYer_CR
 pico_enable_stdio_uart(MSXPLAYer_CR 1)
 pico_add_extra_outputs(MSXPLAYer_CR)
 
+string(TIMESTAMP BUILD_DATE "%Y%m%d%H%M") 
+
 # add url via pico_set_program_url
 target_link_options(${PROJECT_NAME} PRIVATE -Wl,-Map=${PROJECT_NAME}.map)
 target_link_options(${PROJECT_NAME} PRIVATE -Wl,--print-memory-usage)
@@ -83,29 +85,5 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
   PICO_DEFAULT_UART=0 # UART0なら0, UART1なら1
   PICO_DEFAULT_UART_TX_PIN=0 # TXピンのGP番号
   PICO_DEFAULT_UART_RX_PIN=1 # RXピンのGP番号
+  PROJECT_VERSION="${BUILD_DATE}"
 )
-
-# ====================================================================================
-# BUILD_DATEマクロのビルド毎自動更新(自動インクルード)
-# ====================================================================================
-set(DATE_TEMPLATE "${CMAKE_CURRENT_LIST_DIR}/generated/build_date.h.in")
-set(BUILD_DATE_H   "${CMAKE_CURRENT_LIST_DIR}/generated/build_date.h")
-set(UPDATE_SCRIPT  "${CMAKE_CURRENT_BINARY_DIR}/exec_update.cmake")
-
-# テンプレートファイルを生成
-file(WRITE "${DATE_TEMPLATE}" "#define BUILD_DATE \"@CURRENT_D@\"\n")
-
-# ビルド時に実行される更新スクリプトを生成
-file(WRITE "${UPDATE_SCRIPT}" "
-    string(TIMESTAMP CURRENT_D \"%Y%m%d\")
-    configure_file(\"${DATE_TEMPLATE}\" \"${BUILD_DATE_H}\" @ONLY)
-")
-
-# ビルド毎に更新スクリプトを実行
-add_custom_target(update_build_date ALL
-    COMMAND ${CMAKE_COMMAND} -P "${UPDATE_SCRIPT}"
-)
-
-add_dependencies(MSXPLAYer_CR update_build_date)
-target_include_directories(MSXPLAYer_CR PUBLIC ${CMAKE_CURRENT_LIST_DIR}/generated)
-target_compile_options(MSXPLAYer_CR PRIVATE "-include" "${BUILD_DATE_H}")
