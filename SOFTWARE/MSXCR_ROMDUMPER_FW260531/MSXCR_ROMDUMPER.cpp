@@ -1248,11 +1248,12 @@ static BOOL DetectASCII8K(HANDLE hSerial, ROM_INFO* romInfo)
         {
             break;
         }
-        // bankが切り替わっていない場合
-        if ((hashA[0] == hashB[0]) || (hashA[1] == hashB[1]) || (hashA[2] == hashB[2]) || (hashA[3] == hashB[3]))
-        {
-            break;
-        }
+        // ハイドライド3 MSX1版で誤判定になってしまう
+        //// bankが切り替わっていない場合
+        //if ((hashA[0] == hashB[0]) || (hashA[1] == hashB[1]) || (hashA[2] == hashB[2]) || (hashA[3] == hashB[3]))
+        //{
+        //    break;
+        //}
 
         // SRAM Check
         if (!slotRead(hSerial, 0xA000, &sramOrgData[0])) return FALSE;
