@@ -15,20 +15,40 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.2.0)
-set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
+set(sdkVersion 2.3.0)
+set(toolchainVersion 15_2_Rel1)
+set(picotoolVersion 2.3.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD weact_studio_rp2350b_core CACHE STRING "Board type")
+# 独自ボード定義の検索先
+list(APPEND PICO_BOARD_HEADER_DIRS
+    ${CMAKE_CURRENT_LIST_DIR}/boards
+)
+set(PICO_BOARD ILF_RP2354B_MSXREADER CACHE STRING "Board type")
+
+# Pico SDK同梱版ではなく、プロジェクトで固定したTinyUSB 0.21.0を使用する
+include(FetchContent)
+FetchContent_Declare(tinyusb_021
+    GIT_REPOSITORY https://github.com/hathach/tinyusb.git
+    GIT_TAG dae3f9a366bfcddbf9dcf1b48d7500286a849539
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR cmake-not-used
+    PATCH_COMMAND
+        ${CMAKE_COMMAND}
+        -DTINYUSB_SOURCE_DIR=<SOURCE_DIR>
+        -DTINYUSB_PATCH_DIR=${CMAKE_CURRENT_LIST_DIR}/patches/tinyusb
+        -P ${CMAKE_CURRENT_LIST_DIR}/cmake/ApplyTinyusbPatches.cmake
+)
+FetchContent_MakeAvailable(tinyusb_021)
+set(PICO_TINYUSB_PATH ${tinyusb_021_SOURCE_DIR} CACHE PATH "TinyUSB 0.21.0 source" FORCE)
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(MSXPLAYer_CR VERSION 1.40 LANGUAGES C CXX ASM)
+project(MSXPLAYer_CR VERSION 2.00 LANGUAGES C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -40,6 +60,11 @@ set(MSXPLAYer_CR_SOURCES
         ${CMAKE_CURRENT_LIST_DIR}/main.c
         ${CMAKE_CURRENT_LIST_DIR}/commands.c
         ${CMAKE_CURRENT_LIST_DIR}/ports.c
+        ${CMAKE_CURRENT_LIST_DIR}/slot_bus_b2.c
+        ${CMAKE_CURRENT_LIST_DIR}/slot_bus_rev_f.c
+        ${CMAKE_CURRENT_LIST_DIR}/factory_test_dispatch.c
+        ${CMAKE_CURRENT_LIST_DIR}/factory_test_b2.c
+        ${CMAKE_CURRENT_LIST_DIR}/factory_test_rev_f.c
         ${CMAKE_CURRENT_LIST_DIR}/usb_descriptors.c
 )
 
@@ -67,6 +92,7 @@ add_custom_target(build_timestamp_header
 # Generate the PIO header file from ws2812.pio
 pico_generate_pio_header(MSXPLAYer_CR ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/generated)
 pico_generate_pio_header(MSXPLAYer_CR ${CMAKE_CURRENT_LIST_DIR}/pwm_low_hiz.pio OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/generated)
+pico_generate_pio_header(MSXPLAYer_CR ${CMAKE_CURRENT_LIST_DIR}/pwm_push_pull.pio OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/generated)
 
 target_sources(MSXPLAYer_CR PUBLIC
         ${MSXPLAYer_CR_SOURCES}
@@ -101,8 +127,3 @@ pico_add_extra_outputs(MSXPLAYer_CR)
 # add url via pico_set_program_url
 target_link_options(${PROJECT_NAME} PRIVATE -Wl,-Map=${PROJECT_NAME}.map)
 target_link_options(${PROJECT_NAME} PRIVATE -Wl,--print-memory-usage)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-  PICO_DEFAULT_UART=0 # UART0なら0, UART1なら1
-  PICO_DEFAULT_UART_TX_PIN=0 # TXピンのGP番号
-  PICO_DEFAULT_UART_RX_PIN=1 # RXピンのGP番号
-)

@@ -252,6 +252,10 @@ If the dump is presumed to have failed, `[unsuccessful]` is added to the beginni
 
 ## Firmware
 
+- Firmware Version: **2.10**
+- PCB REV_B2 / REV_F is detected automatically at startup.
+- USB CDC uses TinyUSB 0.21.0 with local recovery patches.
+
 Compiled firmware is available in the following folder:
 
 [Firmware Location](./FIRMWARE/UF2)

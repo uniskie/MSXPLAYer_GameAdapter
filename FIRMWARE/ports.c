@@ -12,8 +12,9 @@ PinDef board_pins[] = {
 //    {6,  DIR_OUTPUT, "LED_DOUT"},     // Neopixel (GP6)
 
 //Rev B2-
-    {4,  DIR_OUTPUT, "LED_DOUT"},     // Neopixel (GP6)
+    {4,  DIR_OUTPUT, "LED_DOUT"},     // Neopixel (GP4)
     {5,  DIR_INPUT,  "SLT_SW1"},
+    {6,  DIR_INPUT,  "SLT_SW2"},
 
 // -Rev B
 //    {7,  DIR_OUTPUT, "PSG_CS"},
@@ -65,7 +66,7 @@ PinDef board_pins[] = {
     {27, DIR_OUTPUT, "CS1-2"},
     {28, DIR_OUTPUT, ""},
     {29, DIR_OUTPUT, ""},            //CS2-1
-    {30, DIR_OUTPUT, ""},           //CS2-2
+    {30, DIR_OUTPUT, "BUFDIR"},
 
 
     //    {25, DIR_OUTPUT, "LED"},            //V2 PCBではSLT_SEL1

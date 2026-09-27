@@ -1,3 +1,7 @@
 *.BAK001
 *.BAK002
 *.BAK003
+FIRMWARE/build/
+FIRMWARE/build-*/
+FIRMWARE/generated/
+FIRMWARE/history.md

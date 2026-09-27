@@ -31,6 +31,17 @@
 //  26/06/01 v1.41      IOTRのIOアドレス加算の仕様を変更
 //  26/06/01 v1.42      RMRDのBANK指定のバグを修正
 //  26/06/01 v1.43      CDC OUTPUT BUFFERのmutex制御を追加
+//  26/09/07 v2.00      PCB REV_B2/REV_F判別、REV_Fデータバスバッファ制御を追加
+//                      REV_F用Factory GPIO Testを追加
+//                      Pico SDK 2.3.0、TinyUSB 0.21.0、RP2354B独自ボード定義へ更新
+//                      PCB REV_F判定をGPIO6出力とGPIO5入力の比較方式へ変更
+//  26/09/27 v2.10      USB CDC大量転送時の送受信安定性を改善
+//                      CDC送信キューと送信中状態を一元管理し、Core間排他制御を修正
+//                      ホスト受信遅延時のTX FIFO上書きを禁止し、バックプレッシャー制御を追加
+//                      USB切断時の送信キュー破棄とDTR/RTS変更時のキュー維持に対応
+//                      TinyUSB 0.21.0へUSBDイベントキュー飽和時の復旧パッチを追加
+//                      BRCVのLF、CR、CRLF、LFCR終端処理を修正
+//                      時間依存のメモリ・IOアクセス関数をRAM実行へ変更
 //
 ////////////////////////////////////////////////////////////////////////
 
@@ -72,11 +83,14 @@
 #include "boot/picoboot.h"
 #include "boot/picobin.h"
 #include "pwm_low_hiz.pio.h"                    // コンパイル済みPIOプログラムヘッダ
+#include "pwm_push_pull.pio.h"                  // REV_F用Push-Pullクロック
 #include "pico/version.h"                       // SDKのバージョン情報
 #include "build_timestamp.h"                    // TimeStampのヘッダーファイル
 
 #include "commands.h"                           // 別ファイルに分割したコマンドテーブル // commands.c 参照
 #include "ports.h"                              // 別ファイルに分割したボードピン定義 // ports.c 参照
+#include "slot_bus.h"                           // PCBリビジョン別スロットバス処理
+#include "factory_test.h"                        // PCBリビジョン別出荷GPIOテスト
 
 //#define HW_NAME     "ILF ROM Cassette Reader V2" // ハード名
 #define HW_NAME     "ILF ROM Cassette Reader V2" // ハード名
@@ -92,11 +106,11 @@
 #define HWINFO_PSGUNIT          0           // PSGUNIT                     (0無/1有)
 
 //#define PCBVER_B
-#define PCBVER_B2
+#define PCBVER_B2_F
 
-#ifdef PCBVER_B2 
-//Rev B2
-    #define HW_VERSION  "REV_B2"                      // ハードリビジョン
+#ifdef PCBVER_B2_F
+//Rev B2/F
+    #define HW_VERSION  (pcbRevValid ? (pcbRevF ? "REV_F" : "REV_B2") : "UNKNOWN") // ハードリビジョン
     #define HWINFO_CURRENTSENSOR    1           // 電流センサ                   (0無/1有)
     #define SlotPowerON()            gpio_put(2, 0)
     #define SlotPowerOFF()           gpio_put(2, 1)
@@ -122,7 +136,7 @@
     //Rev B
         #define WS2812_PIN 6                            // デフォルト GP6 を使用 // 元の定義に合わせる
     #endif
-    #ifdef PCBVER_B2 
+    #ifdef PCBVER_B2_F
     // Rev B2-
         #define WS2812_PIN 4                            // デフォルト GP4 を使用 // 元の定義に合わせる
     #endif
@@ -132,6 +146,8 @@
 // #define MAX_STRING   32                          // (注) commands.h と整合
 #define MAX_ARG      4
 #define RX_BUF_SIZE  2048
+#define ASCII_LF     0x0A
+#define ASCII_CR     0x0D
 #define CMD_BUF_NUM  2048
 #define DATABUF_SIZE 64*1024                     // 64KB バッファ
 #define CMP_LOOP     1000
@@ -169,6 +185,47 @@ int wrWait = HSET_DEFNUM_WRWAIT;                  // Memory Write時のwr信号L
 int rdWait = HSET_DEFNUM_RDWAIT;                  // Memory Read時のrd信号Low時間(n x 10ns)
 int memWait = HSET_DEFNUM_MEMWAIT;                // Memory R/W時のアクセスのWait時間(n x 10ns)
 bool p6_16kbMode = false;                         // PC6001 mode
+bool pcbRevF = false;                             // PCB REV_F判定フラグ
+bool pcbRevValid = true;                          // PCBリビジョン判定結果
+static const slot_bus_ops_t *slot_bus_ops = &slot_bus_b2_ops;
+
+void init_all_pins(void);
+
+void slot_bus_select(bool rev_f) {
+    slot_bus_ops = rev_f ? &slot_bus_rev_f_ops : &slot_bus_b2_ops;
+}
+
+void slot_bus_data_input(void) {
+    slot_bus_ops->data_input();
+}
+
+void slot_bus_init_pins(uint64_t out_mask) {
+    slot_bus_ops->init_pins(out_mask);
+}
+
+void slot_bus_control_write(uint64_t mask, uint64_t value) {
+    slot_bus_ops->control_write(mask, value);
+}
+
+int __not_in_flash_func(slotM1ReadData)(uint8_t slot, uint16_t address, uint8_t *data) {
+    return slot_bus_ops->m1_read(slot, address, data);
+}
+
+int __not_in_flash_func(slotReadData)(uint8_t slot, uint16_t address, uint8_t *data) {
+    return slot_bus_ops->mem_read(slot, address, data);
+}
+
+int __not_in_flash_func(slotWriteData)(uint8_t slot, uint16_t address, uint8_t data) {
+    return slot_bus_ops->mem_write(slot, address, data);
+}
+
+int __not_in_flash_func(slotReadIO)(uint16_t address, uint8_t *data) {
+    return slot_bus_ops->io_read(address, data);
+}
+
+int __not_in_flash_func(slotWriteIO)(uint16_t address, uint8_t data) {
+    return slot_bus_ops->io_write(address, data);
+}
 
 uint slice_num;
 
@@ -186,6 +243,14 @@ bool ledChgReq  = false;
 uint8_t ledColorR[4];
 uint8_t ledColorG[4];
 uint8_t ledColorB[4];
+
+typedef enum {
+    FACTORY_LED_NONE,
+    FACTORY_LED_PASS,
+    FACTORY_LED_FAIL
+} factory_led_result_t;
+
+volatile factory_led_result_t factoryLedResult = FACTORY_LED_NONE;
 
 // スクリプトモードのエラーコード定義
 typedef enum {
@@ -207,7 +272,8 @@ typedef struct {
 
 ExecutionState execState = {0, 0, 0, 0};
 
-// GPIO組み合わせテーブル
+// GPIO組み合わせテーブル（実装はfactory_test_*.cへ分離）
+#if 0
 typedef struct {
     uint gpio_out;
     uint gpio_check;
@@ -237,6 +303,37 @@ const GPIO_PAIR gpio_pairs[] = {
 
 const int NUM_GPIO_PAIRS = sizeof(gpio_pairs) / sizeof(GPIO_PAIR);
 
+// REV_F GPIO組み合わせテーブル（RP2350B QFN端子で隣接しないGPIOを組み合わせる）
+const GPIO_PAIR gpio_pairs_rev_f[] = {
+    {7, 31},     // 出力専用GPIO
+    {24, 32},
+    {25, 33},
+    {26, 34},
+    {27, 35},
+    {37, 8},
+    {38, 9},
+    {18, 21},    // 通常GPIO
+    {19, 22},
+    {20, 36},
+    {23, 39}
+};
+
+// REV_F BUFDIRチェック用テーブル（gpio_outはバッファ側GPIO）
+const GPIO_PAIR gpio_pairs_rev_f_buf[] = {
+    {40, 10},
+    {41, 11},
+    {42, 12},
+    {43, 13},
+    {44, 14},
+    {45, 15},
+    {46, 16},
+    {47, 17}
+};
+
+const int NUM_GPIO_PAIRS_REV_F = sizeof(gpio_pairs_rev_f) / sizeof(GPIO_PAIR);
+const int NUM_GPIO_PAIRS_REV_F_BUF = sizeof(gpio_pairs_rev_f_buf) / sizeof(GPIO_PAIR);
+#endif
+
 // MEGAROM Mapperの設定値
 typedef struct {
     bool megarom;            // 非MegaROM or MegaROM 
@@ -252,6 +349,7 @@ MegaROM_Mapper romMapper ;
 // MUTEX
 auto_init_mutex(cmdcount_mutex);
 auto_init_mutex(cdc_output_mutex);
+auto_init_mutex(cdc_producer_mutex);
 
 
 // PIO にデータを流すラッパー
@@ -313,62 +411,93 @@ bool overCurrent = false;                    // 過電流検出フラグ // 割�
 
 typedef struct {
     char buf[CDC_PRINTF_BUF_SIZE];            // 出力データバッファ // テキスト/バイナリを格納
-    bool valid;                               // 有効フラグ // キューの有効性
+    uint8_t state;                            // FREE/WRITING/READY/SENDING
     size_t binLength;                         // バイナリ長 (0 => テキスト) // 0 のときは strlen 使用
 } cdc_msg_t;
 
-static cdc_msg_t cdc_queue[CDC_PRINTF_QSIZE]; // CDC 出力キュー配列 // リングバッファ
-static volatile int cdc_q_write = 0;          // 書き込みインデックス // produce index
-static volatile int cdc_q_read  = 0;          // 読み出しインデックス // consume index
-static volatile int cdc_q_count = 0;          // キュー内件数 // 同期注意
+enum {
+    CDC_MSG_FREE,
+    CDC_MSG_WRITING,
+    CDC_MSG_READY,
+    CDC_MSG_SENDING
+};
+
+typedef struct {
+    cdc_msg_t queue[CDC_PRINTF_QSIZE];
+    int write_index;
+    int read_index;
+    int count;
+    bool active;
+    size_t length;
+    size_t offset;
+} cdc_tx_state_t;
+
+static cdc_tx_state_t cdc_tx;
+
+static int cdc_queue_reserve(void) {
+    while (true) {
+        mutex_enter_blocking(&cdc_producer_mutex);
+        mutex_enter_blocking(&cdc_output_mutex);
+        if (cdc_tx.count < CDC_PRINTF_QSIZE - 1) {
+            int index = cdc_tx.write_index;
+            cdc_tx.queue[index].state = CDC_MSG_WRITING;
+            cdc_tx.write_index = (cdc_tx.write_index + 1) % CDC_PRINTF_QSIZE;
+            cdc_tx.count++;
+            mutex_exit(&cdc_output_mutex);
+            return index;
+        }
+        mutex_exit(&cdc_output_mutex);
+        mutex_exit(&cdc_producer_mutex);
+        tight_loop_contents();
+    }
+}
+
+static inline void cdc_queue_publish(int index, size_t length) {
+    mutex_enter_blocking(&cdc_output_mutex);
+    if (cdc_tx.queue[index].state != CDC_MSG_WRITING) {
+        mutex_exit(&cdc_output_mutex);
+        mutex_exit(&cdc_producer_mutex);
+        return;
+    }
+    cdc_tx.queue[index].binLength = length;
+    cdc_tx.queue[index].state = CDC_MSG_READY;
+    mutex_exit(&cdc_output_mutex);
+    mutex_exit(&cdc_producer_mutex);
+}
+
+static void cdc_queue_reset(void) {
+    mutex_enter_blocking(&cdc_producer_mutex);
+    mutex_enter_blocking(&cdc_output_mutex);
+    for (int i = 0; i < CDC_PRINTF_QSIZE; i++) cdc_tx.queue[i].state = CDC_MSG_FREE;
+    cdc_tx.write_index = 0;
+    cdc_tx.read_index = 0;
+    cdc_tx.count = 0;
+    cdc_tx.active = false;
+    cdc_tx.length = 0;
+    cdc_tx.offset = 0;
+    mutex_exit(&cdc_output_mutex);
+    mutex_exit(&cdc_producer_mutex);
+}
 
 // CDCへ文字列出力 + 書式化（64バイト分割出力対応 ※MAX256Byte）
 // Tiny-USBのCDC出力はUSB規格の都合で1回の送信MAXは64Byteそのため分割して送付する。
 void cdc_printf(const char *fmt, ...) {
-
-    while (cdc_q_count >= CDC_PRINTF_QSIZE-1) { // キュー満杯なら待機 // ブロッキング挙動
-        sleep_ms(1);                             // 少し待って再試行
-    }
-    char tmp[CDC_PRINTF_BUF_SIZE];              // 書式展開バッファ
+    int index = cdc_queue_reserve();
     va_list args;
     va_start(args, fmt);                        // 可変引数開始
-    vsnprintf(tmp, sizeof(tmp), fmt, args);    // フォーマット出力
+    vsnprintf(cdc_tx.queue[index].buf, CDC_PRINTF_BUF_SIZE, fmt, args);
     va_end(args);                               // 可変引数終了
-
-    strncpy(cdc_queue[cdc_q_write].buf, tmp, CDC_PRINTF_BUF_SIZE-1); // バッファコピー // NUL 終端保証
-    cdc_queue[cdc_q_write].buf[CDC_PRINTF_BUF_SIZE-1] = 0; // 終端保証
-    cdc_queue[cdc_q_write].binLength = 0;        // テキストモード指定
-    cdc_queue[cdc_q_write].valid = true;         // 有効化
-    cdc_q_write = (cdc_q_write + 1) % CDC_PRINTF_QSIZE; // 次の書き込み位置へ
-    mutex_enter_blocking(&cdc_output_mutex);  // ロック
-    cdc_q_count++;                                // 件数インクリメント
-    mutex_exit(&cdc_output_mutex);  // ロック解除
+    cdc_tx.queue[index].buf[CDC_PRINTF_BUF_SIZE-1] = 0;
+    cdc_queue_publish(index, 0);
 }
 
 void cdc_bufOutput(int address,int len) {
     int offset = 0;                              // バッファ送信オフセット // 送信済みバイト数
-    int i;
-
-
     while (offset < len) {
-        while (cdc_q_count >= CDC_PRINTF_QSIZE-1) { // キュー満杯時待機
-            sleep_ms(1);
-        }
         int chunk = ((len - offset) < CDC_PRINTF_BUF_SIZE) ? (len - offset) : CDC_PRINTF_BUF_SIZE; // 分割サイズ決定
-
-        for (i=0;i<chunk;i++){
-            if ((i+offset+address)<DATABUF_SIZE)            // 範囲チェック // バッファ外なら 0x00 を入れる
-                cdc_queue[cdc_q_write].buf[i] = slotMem[i+offset+address]; // slotMem からコピー
-            else
-                cdc_queue[cdc_q_write].buf[i] = 0x00;       // 範囲外はゼロ埋め
-        }
-
-        cdc_queue[cdc_q_write].binLength = chunk; // バイナリ長を設定
-        cdc_queue[cdc_q_write].valid = true;      // 有効化
-        cdc_q_write = (cdc_q_write + 1) % CDC_PRINTF_QSIZE; // 次の書き込み位置へ
-        mutex_enter_blocking(&cdc_output_mutex);  // ロック
-        cdc_q_count++;                             // 件数インクリメント
-        mutex_exit(&cdc_output_mutex);  // ロック解除
+        int index = cdc_queue_reserve();
+        memcpy(cdc_tx.queue[index].buf, &slotMem[address + offset], chunk);
+        cdc_queue_publish(index, chunk);
         offset += chunk;                           // オフセット進める
     }
     
@@ -385,8 +514,40 @@ int powerCheck(){
 void ledTask(bool ledChange){
     static int ledStatusOld = LED_STATUS_IDLE; // 直前表示状態保持
     static int ledStatuDelay = 0;             // アクセス表示保持カウンタ
+    static factory_led_result_t factoryLedOld = FACTORY_LED_NONE;
+    static uint32_t factoryLedNextMs = 0;
+    static bool factoryLedOn = false;
 
     int ledStatus;
+
+    if (factoryLedResult != FACTORY_LED_NONE) {
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        uint32_t interval = (factoryLedResult == FACTORY_LED_PASS) ? 500 : 250;
+        if (factoryLedResult != factoryLedOld) {
+            pio_sm_clear_fifos(pio, sm_ws2812);      // 虹色表示の未送信データを破棄
+            factoryLedOld = factoryLedResult;
+            factoryLedOn = true;
+            factoryLedNextMs = now + interval;
+            if (factoryLedResult == FACTORY_LED_PASS) put_pixel(urgb_u32(0x00, 0x00, 0x40));
+            else put_pixel(urgb_u32(0x00, 0x40, 0x00));
+        } else if ((int32_t)(now - factoryLedNextMs) >= 0) {
+            factoryLedOn = !factoryLedOn;
+            factoryLedNextMs = now + interval;
+            if (factoryLedOn) {
+                if (factoryLedResult == FACTORY_LED_PASS) put_pixel(urgb_u32(0x00, 0x00, 0x40));
+                else put_pixel(urgb_u32(0x00, 0x40, 0x00));
+            } else {
+                put_pixel(urgb_u32(0x00, 0x00, 0x00));
+            }
+        }
+        return;
+    }
+    if (factoryLedOld != FACTORY_LED_NONE) {
+        factoryLedOld = FACTORY_LED_NONE;
+        ledStatusOld = -1;                         // Factory表示から通常表示へ強制更新
+        ledStatuDelay = 0;
+    }
+    factoryLedOld = FACTORY_LED_NONE;
 
     if (ledChange == true) ledStatusOld = LED_STATUS_IDLE;
 
@@ -490,286 +651,13 @@ bool bufAddressVaild(int address){
     return true;                                  // 正常
 }
 
-int slotInit() {
-    uint64_t data_mask = 0;
-    uint64_t address_mask = 0;
-    address_mask = (((uint64_t) 0xffff    << 34) | ((uint64_t) 0x7f    << 25) | ((uint64_t) 0xffff    << 9)); // アドレス用マスク設定
-    data_mask    = ((uint64_t) 0xff      << 40); // データ用マスク設定
-    gpio_set_dir_in_masked64(data_mask);         // データピンを入力に設定
-    gpio_put_masked64(address_mask, address_mask); // アドレスピンを既定値にプット
-    return CMD_OK;                               // 初期化成功
-}
+// PCBリビジョン別のMemory/IOアクセス処理はslot_bus_*.cに分離。 */
+// PCBリビジョン別GPIOテスト本体はfactory_test_*.cに分離
 
-int slotReadData(uint8_t slot, uint16_t address, uint8_t *data) {
-    uint32_t address_mask = 0; // 32bit 用マスク
-    uint32_t address_value = 0;
-    uint32_t data_mask = 0;
-    uint32_t slot_mask = 0;
-    uint32_t slot_data = 0;
-    uint32_t rd_mask = 0;
-    uint32_t mrq_mask = 0;
-    uint32_t wr_mask = 0;
-
-    sltAcc = true;                                 // アクセス開始フラグ立てる
-
-    data_mask       = ((uint32_t) 0xff      << 8); // データピンマスク(8bit)
-    wr_mask         = ((uint32_t) 1ULL << 5);      // WR 信号マスク
-    rd_mask         = ((uint32_t) 1ULL << 6);     // RD 信号マスク
-    mrq_mask        = ((uint32_t) 1ULL << 4);     // MRQ 信号マスク
-
-    if (powerCheck() != CMD_OK) return CMD_FAIL;  // 電源異常チェック
-
-    #ifdef PCBVER_B 
-   //Rev B
-        address_mask    = ((uint32_t) 0xffff    << 9); // アドレスマスク
-        address_value   = ((uint32_t) address   << 9); // アドレス値
-    #endif
-
-    #ifdef PCBVER_B2 
-    //Rev B2
-        address_mask    = ((uint32_t) 0xffff    << 8); // アドレスマスク
-        address_value   = ((uint32_t) address   << 8); // アドレス値
-    #endif
-
-    gpioc_hi_oe_set(wr_mask);                       // WRをPushPullに変更する(BS6101対策)
-
-    gpiolo_put_masked(address_mask, address_value);  // アドレス出力
-    gpiohi_put_masked(mrq_mask, 0x0);               // MRQ LOW (アサート)
-    gpioc_hi_oe_clr(data_mask);                     // データピンを入力に設定 (OE クリア)
-
-    #ifdef PCBVER_B2 
-    // Rev B2-
-        slot_mask       = ((uint32_t) 0x3f      << 24); // スロット選択マスク
-        slot_data       = ((uint32_t) 0x3f      << 24); // デフォルト値
-
-        if (slot == 1) {
-            if(p6_16kbMode){
-                if ((address >= 0x6000) && (address < 0x8000))      slot_data = ((uint32_t) 0x37 << 24); // スロット1のバンク切替
-                else slot_data = ((uint32_t) 0x3e << 24);
-
-            }else{
-                if ((address >= 0x4000) && (address < 0x8000))      slot_data = ((uint32_t) 0x38 << 24); // スロット1のバンク切替
-                else if ((address >= 0x8000) && (address < 0xC000)) slot_data = ((uint32_t) 0x34 << 24);
-                else slot_data = ((uint32_t) 0x3e << 24);
-            }
-        } 
-    #endif
-
-
-
-    #ifdef PCBVER_B 
-    //-RevB
-        slot_mask       = ((uint32_t) 0x3f      << 25); // スロット選択マスク
-        slot_data       = ((uint32_t) 0x3f      << 25); // デフォルト値
-        if (slot == 1) {
-            if ((address >= 0x4000) && (address < 0x8000))      slot_data = ((uint32_t) 0x3c << 25); // スロット1のバンク切替
-            else if ((address >= 0x8000) && (address < 0xC000)) slot_data = ((uint32_t) 0x3a << 25);
-            else slot_data = ((uint32_t) 0x3e << 25);
-        } 
-        if (slot == 2)  {
-            if ((address >= 0x4000) && (address < 0x8000))      slot_data = ((uint32_t) 0x27 << 25); // スロット2のバンク切替
-            else if ((address >= 0x8000) && (address < 0xC000)) slot_data = ((uint32_t) 0x17 << 25);
-            else slot_data = ((uint32_t) 0x37 << 25);
-        }
-    #endif 
-    gpiolo_put_masked(slot_mask, slot_data);          // スロット選択値を出力
-    gpiohi_put_masked(rd_mask, 0x0);                // RD LOW (アサート)
-
-
-//    busy_wait_at_least_cycles(72);                  // タイミング確保 (720ns)
-    busy_wait_at_least_cycles(rdWait);                  // タイミング確保 (1000ns)
-    uint32_t gpio_hi = gpioc_hi_in_get();           // 高位 GPIO の入力を取得
-    gpiohi_put_masked(rd_mask, rd_mask);            // RD を解除 (HIGH)
-
-//  gpiolo_put_masked(slot_mask, slot_mask);          // スロット選択を解除 (トライ状態に戻す)
-//  SLOTにDATAのHOLD確保のためコンデンサーが付いている機種があるその対策でPush pull時間を延ばす
-    gpioc_lo_out_xor((gpioc_lo_out_get() ^ slot_mask) & slot_mask); // 現在値と XOR → マスク適用で出力変更
-    gpiohi_put_masked(mrq_mask, mrq_mask);          // MRQ を解除 (HIGH)
-
-    uint8_t d = 0;
-    d = (uint8_t)((gpio_hi >> 8) & 0xff);           // 取得した GPIO の該当ビットを抽出
-    *data = d;                                      // 呼び出し側へ返す
-//    busy_wait_at_least_cycles(10);                  // タイミング確保 (約561ns)
-    
-    gpioc_lo_oe_xor((gpioc_lo_oe_get() ^ (~slot_mask)) & slot_mask); // 現在値と XOR → マスク適用で出力変更
-    gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGH (BS6101対策)(リリース)
-
-    busy_wait_at_least_cycles(memWait);             // waitタイミング確保
-
-    sltAcc = false;                                 // アクセス終了フラグクリア
-    return CMD_OK;
-}
-
-
-int slotWriteData(uint8_t slot, uint16_t address, uint8_t data) {
-    uint32_t address_mask = 0;
-    uint32_t address_value = 0;
-    uint32_t data_mask = 0;
-    uint32_t data_data = 0;
-    uint32_t slot_mask = 0;
-    uint32_t slot_data = 0;
-    uint32_t rd_mask = 0;
-    uint32_t wr_mask = 0;
-    uint32_t mrq_mask = 0;
-
-
-    sltAcc = true;                                  // アクセス開始フラグ立てる
-
-    data_mask       = ((uint32_t) 0xff      << 8);  // データマスク
-    data_data       = ((uint32_t) data      << 8);  // データをシフトして出力用値にする
-    wr_mask         = ((uint32_t) 1ULL << 5);      // WR 信号マスク
-    rd_mask         = ((uint32_t) 1ULL << 6);     // RD 信号マスク
-    mrq_mask        = ((uint32_t) 1ULL << 4);      // MRQ 信号マスク
-    if (powerCheck() != CMD_OK) return CMD_FAIL;   // 電源チェック
-    #ifdef PCBVER_B 
-    //-RevB
-        address_mask    = ((uint32_t) 0xffff    << 9); // アドレスマスク
-        address_value   = ((uint32_t) address   << 9); // アドレス値
-    #endif
-
-    #ifdef PCBVER_B2 
-    // Rev B2-
-        address_mask    = ((uint32_t) 0xffff    << 8); // アドレスマスク
-        address_value   = ((uint32_t) address   << 8); // アドレス値
-    #endif
-    gpioc_hi_oe_set(rd_mask);                       // RDをPushPullに変更する(BS6101対策)
-    gpiolo_put_masked(address_mask, address_value);  // アドレス出力
-    gpiohi_put_masked(mrq_mask, 0x0);               // MRQ LOW
-    gpioc_hi_oe_set(data_mask);                     // データピンを出力にする (OE 設定)
-    gpiohi_put_masked(data_mask, data_data);        // データを高速 IO へ書き込む
-
-    #ifdef PCBVER_B 
-    //-RevB
-        slot_mask       = ((uint32_t) 0x3f      << 25); // スロットマスク
-        slot_data       = ((uint32_t) 0x3f      << 25); // デフォルト値
-
-        if (slot == 1) {
-        slot_data = ((uint32_t) 0x3e << 25);       // スロット1 の設定
-        } 
-        if (slot == 2)  {
-            slot_data = ((uint32_t) 0x37 << 25);       // スロット2 の設定
-        }
-    #endif
-    #ifdef PCBVER_B2 
-    //-RevB2
-        slot_mask       = ((uint32_t) 0x3f      << 24); // スロットマスク
-        slot_data       = ((uint32_t) 0x3f      << 24); // デフォルト値
-
-        if (slot == 1) {
-            if(p6_16kbMode){
-                if ((address >= 0x6000) && (address < 0x8000))      slot_data = ((uint32_t) 0x37 << 24); // スロット1のバンク切替
-                else slot_data = ((uint32_t) 0x3e << 24);
-            }else{
-                slot_data = ((uint32_t) 0x3e << 24);       // スロット1 の設定
-            }
-        }
-    #endif
-
-    gpiolo_put_masked(slot_mask, slot_data);          // スロット選択値を出力
-    busy_wait_at_least_cycles(36);                  // タイミング確保 (360ns)
-
-    gpiohi_put_masked(wr_mask, 0x0);                // WR LOW (アサート)
-    busy_wait_at_least_cycles(wrWait);                  // タイミング確保 (180ns)
-    gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGH (リリース)
-    gpiohi_put_masked(rd_mask, rd_mask);            // RD を解除 (HIGH)
-    gpiolo_put_masked(slot_mask, slot_mask);          // スロット選択解除
-    gpiohi_put_masked(mrq_mask, mrq_mask);          // MRQ HIGH (リリース)
-    gpioc_hi_oe_clr(data_mask);                     // データピンを入力に戻す
-    gpiohi_put_masked(rd_mask, rd_mask);            // RD を解除(BS6101対策) (HIGH)
-    busy_wait_at_least_cycles(memWait);             // waitタイミング確保
-
-    sltAcc = false;                                 // アクセス終了フラグクリア
-    return CMD_OK;
-}
-
-int slotReadIO(uint16_t address, uint8_t *data) {
-    uint32_t address_mask = 0;
-    uint32_t address_value = 0;
-    uint32_t data_mask = 0;
-    uint32_t rd_mask = 0;
-    uint32_t io_mask = 0;
-
-    sltAcc = true;                                 // アクセス開始フラグ
-    data_mask       = ((uint32_t) 0xff      << 8); // データマスク
-    rd_mask         = ((uint32_t) 1ULL << 6);     // RD マスク
-    io_mask         = ((uint32_t) 1ULL << 3);     // IO マスク
-
-    if (powerCheck() != CMD_OK) return CMD_FAIL;  // 電源チェック
-
-    #ifdef PCBVER_B 
-    //-RevB
-        address_mask    = ((uint32_t) 0xffff    << 9); // アドレスマスク
-        address_value   = ((uint32_t) address   << 9); // アドレス値
-    #endif
-
-    #ifdef PCBVER_B2 
-    // Rev B2-
-        address_mask    = ((uint32_t) 0xffff    << 8); // アドレスマスク
-        address_value   = ((uint32_t) address   << 8); // アドレス値
-    #endif
-    gpiolo_put_masked(address_mask, address_value);  // アドレス出力
-    gpiohi_put_masked(io_mask, 0x0);                // IO LOW (アサート)
-    gpioc_hi_oe_clr(data_mask);                     // データピンを入力に切替
-
-    gpiohi_put_masked(rd_mask, 0x0);                // RD LOW
-    busy_wait_at_least_cycles(72);                  // 待ち時間
-    uint32_t gpio_hi = gpioc_hi_in_get();           // GPIO 入力読み取り
-    gpiohi_put_masked(rd_mask, rd_mask);            // RD リリース
-    gpiohi_put_masked(io_mask, io_mask);            // IO リリース
-
-    uint8_t d = 0;
-    d = (uint8_t)((gpio_hi >> 8) & 0xff);           // データ抽出
-    *data = d;                                      // 出力
-    sltAcc = false;                                 // アクセス終了
-    return CMD_OK;
-}
-
-int slotWriteIO(uint16_t address, uint8_t data) {
-    uint32_t address_mask = 0;
-    uint32_t address_value = 0;
-    uint32_t data_mask = 0;
-    uint32_t data_data = 0;
-    uint32_t wr_mask = 0;
-    uint32_t io_mask = 0;
-
-    sltAcc = true;                                  // アクセス開始
-    data_mask       = ((uint32_t) 0xff      << 8);  // データマスク
-    data_data       = ((uint32_t) data      << 8);  // 出力データ
-    wr_mask         = ((uint32_t) 1ULL << 5);      // WR マスク
-    io_mask         = ((uint32_t) 1ULL << 3);      // IO マスク
-
-    if (powerCheck() != CMD_OK) return CMD_FAIL;   // 電源チェック
-    #ifdef PCBVER_B 
-    //-RevB
-        address_mask    = ((uint32_t) 0xffff    << 9); // アドレスマスク
-        address_value   = ((uint32_t) address   << 9); // アドレス値
-    #endif
-
-    #ifdef PCBVER_B2 
-    // Rev B2-
-        address_mask    = ((uint32_t) 0xffff    << 8); // アドレスマスク
-        address_value   = ((uint32_t) address   << 8); // アドレス値
-    #endif
-
-    gpiolo_put_masked(address_mask, address_value);  // アドレス出力
-    gpiohi_put_masked(io_mask, 0x0);                // IO LOW
-    gpioc_hi_oe_set(data_mask);                     // データピン出力
-    gpiohi_put_masked(data_mask, data_data);        // データ書込
-
-    busy_wait_at_least_cycles(36);                  // タイミング
-    gpiohi_put_masked(wr_mask, 0x0);                // WR LOW
-    busy_wait_at_least_cycles(18);                  // タイミング
-    gpiohi_put_masked(wr_mask, wr_mask);            // WR HIGHsm
-    gpiohi_put_masked(io_mask, io_mask);            // IO リリース
-    gpioc_hi_oe_clr(data_mask);                     // データピン入力に戻す
-
-    sltAcc = false;                                 // アクセス終了
-    return CMD_OK;
-}
-
-
-// GPIOテストシーケンス（すべてのテスト処理を1つの関数にまとめ）
 int gpio_test_sequence(void) {
+    int result = CMD_OK;
+    factoryLedResult = FACTORY_LED_NONE;
+
     cdc_printf("\n========================================\n");
     cdc_printf("Factory GPIO Test Started\n");
     cdc_printf("========================================\n\n");
@@ -777,6 +665,26 @@ int gpio_test_sequence(void) {
     sltPower = true;                                       // 電源 ON フラグ
     SlotPowerON();
     busy_wait_ms(5);
+
+    if (!pcbRevValid) {
+        cdc_printf("PCB revision detection failed\n");
+        result = CMD_FAIL;
+        goto cleanup;
+    }
+
+    if (factory_gpio_test() != CMD_OK) {
+        result = CMD_FAIL;
+        goto cleanup;
+    }
+#if 0
+    {
+    cdc_printf("REV_B2 GPIO Pair List\n");
+    for (int i = 0; i < NUM_GPIO_PAIRS; i++) {
+        cdc_printf("GPIO%d(%s)-GPIO%d(%s)\n", gpio_pairs[i].gpio_out,
+                   gpio_signal_name(gpio_pairs[i].gpio_out), gpio_pairs[i].gpio_check,
+                   gpio_signal_name(gpio_pairs[i].gpio_check));
+    }
+    cdc_printf("\n");
 
     // ステップ1: GPIO7-47をすべて入力に設定
     cdc_printf("Switch GPIO7-47 to input mode...\n");
@@ -797,7 +705,8 @@ int gpio_test_sequence(void) {
         uint pin_check = gpio_pairs[i].gpio_check;
         
         cdc_printf("========================================\n");
-        cdc_printf("Test %d/%d: GPIO%d-GPIO%d\n", i + 1, NUM_GPIO_PAIRS, pin_out, pin_check);
+        cdc_printf("Test %d/%d: GPIO%d(%s)-GPIO%d(%s)\n", i + 1, NUM_GPIO_PAIRS,
+                   pin_out, gpio_signal_name(pin_out), pin_check, gpio_signal_name(pin_check));
         cdc_printf("========================================\n");
         
         // ステップ2: GPIO7-47がすべて1であることを確認
@@ -816,7 +725,8 @@ int gpio_test_sequence(void) {
         
         if (!all_high) {
             cdc_printf("Test %d Failed: Step 2\n\n", i + 1);
-            return CMD_FAIL;
+            result = CMD_FAIL;
+            goto cleanup;
         }
         cdc_printf("Complete: All GPIO are high\n");
         busy_wait_ms(50);
@@ -831,7 +741,8 @@ int gpio_test_sequence(void) {
         if (gpio_get(pin_out) != 0) {
             cdc_printf("Error: GPIO%d output value is not 0\n", pin_out);
             cdc_printf("Test %d Failed: Step 3\n\n", i + 1);
-            return CMD_FAIL;
+            result = CMD_FAIL;
+            goto cleanup;
         }
         cdc_printf("GPIO%d = 0 Set Complete\n", pin_out);
 //        busy_wait_ms(50);
@@ -841,7 +752,8 @@ int gpio_test_sequence(void) {
         if (gpio_get(pin_check) != 0) {
             cdc_printf("Error: GPIO%d Expected: 0 (Actual: 1)\n", pin_check);
             cdc_printf("Test %d Failed: Step 4-1\n\n", i + 1);
-            return CMD_FAIL;
+            result = CMD_FAIL;
+            goto cleanup;
         }
         cdc_printf("GPIO%d = 0 Verified\n", pin_check);
         
@@ -863,7 +775,8 @@ int gpio_test_sequence(void) {
         
         if (!other_all_high) {
             cdc_printf("Test %d Failed: Step 4-2\n\n", i + 1);
-            return CMD_FAIL;;
+            result = CMD_FAIL;
+            goto cleanup;
         }
         cdc_printf("GPIO%d, GPIO%d and others all high verified\n", pin_out, pin_check);
 //      busy_wait_ms(50);
@@ -876,6 +789,8 @@ int gpio_test_sequence(void) {
         cdc_printf("Test %d: Success\n\n", i + 1);
 //        busy_wait_ms(100);
     }
+    }
+#endif
     
     // ステップ6: LED & Current Sensor Check
     cdc_printf("========================================\n");
@@ -893,9 +808,10 @@ int gpio_test_sequence(void) {
         busy_wait_ms(2);
         
         // タイムアウト防止（シミュレーション用）
-        if (color_progress > 40000) {
+        if (color_progress > 5000) {
             cdc_printf("Timeout: Condition not met\n");
-            return CMD_FAIL;
+            result = CMD_FAIL;
+            goto cleanup;
         }
     }
     cdc_printf("Complete\n");
@@ -905,10 +821,17 @@ int gpio_test_sequence(void) {
     cdc_printf("ALL Test Finished (PASS) \n");
     cdc_printf("========================================\n");
 
+cleanup:
+    slot_bus_data_input();                           // データGPIOを安全な入力状態へ戻す
     SlotPowerOFF();
     sltPower = false;
+    init_all_pins();                                // GPIOを通常動作時の設定へ復元
+    pio_gpio_init(pio, CLOCK_PIN);                  // CLOCKのPIO機能を復元
+    gpio_disable_pulls(CLOCK_PIN);
+    pio_gpio_init(pio, WS2812_PIN);                 // Factory Testで解除したLEDのPIO機能を復元
+    factoryLedResult = (result == CMD_OK) ? FACTORY_LED_PASS : FACTORY_LED_FAIL;
 
-    return CMD_OK;
+    return result;
 }
 // Factory Test               	FTST	cmd_readerFactoryTest      	FTST                                            	戻値: OK                      	Slotの電源を入れて、状態のセルフチェック,各信号の有効化,RESETをします。
 int cmd_readerFactoryTest(const Command_t* cmd) {
@@ -919,6 +842,7 @@ int cmd_readerFactoryTest(const Command_t* cmd) {
 int cmd_slotPowerOn(const Command_t* cmd) {
     uint64_t data_mask = 0;
     uint64_t address_mask = 0;
+    factoryLedResult = FACTORY_LED_NONE;
     overCurrent = false;   
     gpio_set_oeover(39, DIR_OUTPUT);
     gpio_put(39, 0);        //SLT_RESET LOW                         // RESET を LOW にする
@@ -939,15 +863,14 @@ int cmd_slotPowerOn(const Command_t* cmd) {
     //-RevB
         address_mask = (((uint64_t) 0xff7f    << 34) | ((uint64_t) 0x7f    << 25) | ((uint64_t) 0xffff    << 9)); // アドレスマスク
     #endif
-    #ifdef PCBVER_B2 
+    #ifdef PCBVER_B2_F 
     // Rev B2-
-       address_mask = (((uint64_t) 0xff7f    << 34) | ((uint64_t) 0x9f    << 24) | ((uint64_t) 0xffff    << 8)); // アドレスマスク
+       address_mask = (((uint64_t) 0x3f      << 34) | ((uint64_t) 0x9f    << 24) | ((uint64_t) 0xffff    << 8)); // データバスを除くアドレス・制御マスク
     #endif    
     data_mask    = ((uint64_t) 0xff      << 40);           // データマスク
 
-    gpio_set_dir_in_masked64(data_mask);                   // データピン入力
-    gpiolo_put_masked((uint32_t)address_mask,(uint32_t)address_mask);
-    gpiohi_put_masked((uint32_t)(address_mask >> 32u),(uint32_t)(address_mask >> 32u));
+    slot_bus_data_input();                                  // データピン入力
+    slot_bus_control_write(address_mask, address_mask);
 
 //    gpio_put_masked64(address_mask, address_mask);         // アドレスピン設定
     pio_sm_set_enabled(pio, sm_slotclk, true);             //Clock enable
@@ -974,18 +897,18 @@ int cmd_slotPowerOff(const Command_t* cmd) {
     uint64_t data_mask = 0;
     uint64_t address_mask = 0;
 
+    factoryLedResult = FACTORY_LED_NONE;
     data_mask    = ((uint64_t) 0xff      << 40);           // データマスク
     #ifdef PCBVER_B 
     //-RevB
         address_mask = (((uint64_t) 0xff7f    << 34) | ((uint64_t) 0x7f    << 25) | ((uint64_t) 0xffff    << 9)); // アドレスマスク
     #endif
-    #ifdef PCBVER_B2 
+    #ifdef PCBVER_B2_F 
     // Rev B2-
-       address_mask = (((uint64_t) 0xff7f    << 34) | ((uint64_t) 0x9f    << 24) | ((uint64_t) 0xffff    << 8)); // アドレスマスク
+       address_mask = (((uint64_t) 0x3f      << 34) | ((uint64_t) 0x9f    << 24) | ((uint64_t) 0xffff    << 8)); // データバスを除くアドレス・制御マスク
     #endif
-    gpio_set_dir_in_masked64(data_mask);                   // データピン入力
-    gpiolo_put_masked((uint32_t)address_mask,(uint32_t)0x0);
-    gpiohi_put_masked((uint32_t)(address_mask >> 32u),(uint32_t)(0x0));
+    slot_bus_data_input();                                  // データピン入力
+    slot_bus_control_write(address_mask, 0);
 
 //    gpio_put_masked64(address_mask, address_mask);         // アドレス設定
     pio_sm_set_enabled(pio, sm_slotclk, false);             //Clock disable
@@ -993,7 +916,7 @@ int cmd_slotPowerOff(const Command_t* cmd) {
     SlotPowerOFF();
 //    gpio_put(2, 1);         //CH217K EN# HIGH                    // 電源 OFF
     busy_wait_ms(100);                                     // DisCharge                                      
-    gpio_put_masked64(address_mask, 0);                    // アドレスリセット
+    slot_bus_control_write(address_mask, 0);               // アドレスリセット
     sltPower = false;                                      // 電源フラグをクリア
 
     return CMD_OK;        
@@ -1020,17 +943,17 @@ void gpio_callback(uint gpio, uint32_t events) {
     //-RevB
         address_mask = (((uint64_t) 0xff7f    << 34) | ((uint64_t) 0x7f    << 25) | ((uint64_t) 0xffff    << 9)); // アドレスマスク
     #endif
-    #ifdef PCBVER_B2 
+    #ifdef PCBVER_B2_F 
     // Rev B2-
-       address_mask = (((uint64_t) 0xff7f    << 34) | ((uint64_t) 0x9f    << 24) | ((uint64_t) 0xffff    << 8)); // アドレスマスク
+       address_mask = (((uint64_t) 0x3f      << 34) | ((uint64_t) 0x9f    << 24) | ((uint64_t) 0xffff    << 8)); // データバスを除くアドレス・制御マスク
     #endif
-        gpio_set_dir_in_masked64(data_mask);           // データピン入力
+        slot_bus_data_input();                          // データピン入力
         pio_sm_set_enabled(pio, sm_slotclk, false);             //Clock disable
         SlotPowerOFF();
         gpio_put(CLOCK_PIN, 0);  // GPIO7 を LOW に設定
 
         busy_wait_ms(1);
-        gpio_put_masked64(address_mask, 0);            // アドレスリセット
+        slot_bus_control_write(address_mask, 0);       // アドレスリセット
         sltPower = false;
 
         // スイッチが押されたときにLEDの状態をトグル(立ち上がりエッジ)
@@ -1284,10 +1207,37 @@ void init_all_pins(void) {
     }
     gpio_set_dir_out_masked64(out_mask);           // output一括設定
     gpio_set_dir_in_masked64(in_mask);             // input一括設定
+
+#ifdef PCBVER_B2_F
+    // GPIO5/6をPullup入力にし、初期値とGPIO6 Low出力への追従からREV_Fを判定する
+    gpio_set_dir(5, GPIO_IN);
+    gpio_set_dir(6, GPIO_IN);
+
+    gpio_set_pulls(5,true,false);
+    gpio_set_pulls(6,true,false);
+    busy_wait_us(10);
+    pcbRevValid = true;
+    bool gpio5 = gpio_get(5);
+    bool gpio6 = gpio_get(6);
+    if (!gpio5) {
+        pcbRevF = !gpio6;                          // 00: REV_F、01: REV_B2
+    } else if (gpio6) {
+        gpio_put(6, 0);
+        gpio_set_dir(6, GPIO_OUT);
+        busy_wait_us(10);
+        pcbRevF = (gpio_get(5) == 0);              // GPIO5がLowへ追従すればREV_F
+    } else {
+        pcbRevF = false;                           // 10はREV_B2として扱う
+    }
+    gpio_set_dir(6, GPIO_IN);                      // SLT_SW2入力へ戻す
+    gpio_set_pulls(6,true,false);
+#endif
     gpio_set_pulls(4,true,false);                  //SW1 PULLUP
     gpio_set_pulls(5,true,false);                  //SW2 PULLUP
 
-    gpio_put_masked64(out_mask,0x81);              // output 一括初期化（具体値はボード依存）
+    slot_bus_select(pcbRevF);                         // 起動時にボード別アクセス関数を選択
+    factory_test_select(pcbRevF);                    // 起動時にボード別出荷テストを選択
+    slot_bus_init_pins(out_mask);                    // ボード別のGPIO初期値を設定
     SlotPowerOFF();         //CH217K EN# High       // 電源制御デフォルト
 //    gpio_put(2, 0);         //CH217K EN# High       // 電源制御デフォルト
 //    gpio_put(2, 1);         //CH217K EN# High       // 電源制御デフォルト
@@ -1423,7 +1373,7 @@ int cmd_bufClear(const Command_t* cmd) {
     return CMD_OK;
 }
 
-// BUFFER Dump                 	BDMP	cmd_bufDump         	BDMP,[Buffer Address]                           	戻値: 128Byte DUMP値 +OK      	Bufferのデータ内容の表示(DEBUG用)
+// BUFFER Script            BSCR    cmd_bufScript           BSCR,[Buffer Address](,[SLOT])	                        戻値: OK/FAIL           Bufferの上のScriptを実行します。                  	
 int cmd_bufScript(const Command_t* cmd) {
     int startAddress;
     int length;
@@ -1525,6 +1475,67 @@ int cmd_slotReadMem(const Command_t* cmd) {
 
     if (slotReadData(slot, address, &data) != CMD_OK) return CMD_FAIL; // 実読出し
     cdc_printf("%04x : %02x\n",address,data);               // 出力
+    return CMD_OK;
+}
+
+// Slot Mem Read(M1)               	SMMR	cmd_slotM1Read     	SMMR,[Address](,[Slot])                         	戻値: Read値（ASCII16進) +OK  	Slotから1Byte Readします(M1サイクル)
+int cmd_slotM1Read(const Command_t* cmd) {
+    uint16_t address;
+    uint8_t slot;
+    uint8_t data;
+
+    if (!z80AddressVaild(cmd->arg_val[0]))  return CMD_FAIL; // アドレス判定
+    address = (uint16_t)cmd->arg_val[0];
+
+    slot = slotVaild(cmd->arg_val[1]);                     // スロット判定
+    if (slot == 0) return CMD_FAIL;
+
+    if (slotM1ReadData(slot, address, &data) != CMD_OK) return CMD_FAIL; // 実読出し
+    cdc_printf("%04x : %02x\n",address,data);               // 出力
+    return CMD_OK;
+}
+
+// BUFFER Dump (スロット直接読み出し)
+int cmd_slotM1Dump(const Command_t* cmd) {
+    int startAddress;
+    int length;
+    int slot;
+    uint8_t data;
+
+    // パラメータ
+    if (cmd->arg_val[0] == -1)  startAddress = 0;
+    else                        startAddress = cmd->arg_val[0];
+
+    if (!z80AddressVaild(startAddress))  return CMD_FAIL;   // アドレス検査
+
+    if (cmd->arg_val[1] == -1)  length = 128;
+    else                        length = cmd->arg_val[1];
+
+    slot = slotVaild(cmd->arg_val[2]);                      // スロット取得
+
+    for (size_t i = startAddress; i < (startAddress + length); i += 16) {
+        if (i < DATABUF_SIZE) cdc_printf("%08X  ", (unsigned int)(i)); // 行先頭にアドレス出力
+        for (size_t j = 0; j < 16; j++) {
+            if (i + j < (startAddress + length)) {
+                if (slotM1ReadData(slot, (i+j), &data) != CMD_OK) return CMD_FAIL; // 1byte 読み出し
+                if((i + j) < DATABUF_SIZE) cdc_printf("%02X ", data);            // 16 進表示
+            } else {
+                cdc_printf("   ");
+            }
+        }
+        cdc_printf(" ");
+        for (size_t j = 0; j < 16; j++) {
+            if ((i + j) < (startAddress + length)) {
+                if((i + j) < DATABUF_SIZE) {
+                    if (slotM1ReadData(slot, (i+j), &data) != CMD_OK) return CMD_FAIL; // 再読出し（可読性のため）
+                    cdc_printf("%c", (data >= 0x20 && data <= 0x7E) ? data : '.'); // ASCII 表示
+                }
+            } else {
+                cdc_printf(" ");
+            }
+        }
+        if (i < DATABUF_SIZE) cdc_printf("\n"); // 行末改行
+    }
     return CMD_OK;
 }
 
@@ -1957,11 +1968,8 @@ int cmd_romMapperRead(const Command_t* cmd) {
 
         length = 0;
         while(length < (int) romMapper.romReadSize){
-            while (cdc_q_count >= CDC_PRINTF_QSIZE-1) { // キュー満杯時待機
-                sleep_ms(1);
-            }
-
             int chunk = ((totalLength - length) < CDC_PRINTF_BUF_SIZE) ? (totalLength - length) : CDC_PRINTF_BUF_SIZE; // 分割サイズ決定
+            int index = cdc_queue_reserve();
 
             for (int i=0;i<chunk;i++){
 
@@ -1969,16 +1977,11 @@ int cmd_romMapperRead(const Command_t* cmd) {
                     cmdResult = slotReadData(slot, address, &readData);
                     if (cmdResult != CMD_OK) readData = 0x00;
                 }
-                cdc_queue[cdc_q_write].buf[i] = readData;
+                cdc_tx.queue[index].buf[i] = readData;
                 address++;
             }
 
-            cdc_queue[cdc_q_write].binLength = chunk; // バイナリ長を設定
-            cdc_queue[cdc_q_write].valid = true;      // 有効化
-            cdc_q_write = (cdc_q_write + 1) % CDC_PRINTF_QSIZE; // 次の書き込み位置へ
-            mutex_enter_blocking(&cdc_output_mutex);  // ロック
-            cdc_q_count++;                             // 件数インクリメント
-            mutex_exit(&cdc_output_mutex);  // ロック解除
+            cdc_queue_publish(index, chunk);
             length += chunk;                           // オフセット進める
         }
     }
@@ -2093,9 +2096,13 @@ int main(void)
 
 
     // PIOプログラムをロード
-    uint clkoffset = pio_add_program(pio, &pwm_low_hiz_program);
-    // 初期化用インライン関数を使用
-    pwm_low_hiz_program_init(pio, sm_slotclk, clkoffset, CLOCK_PIN);
+    if (pcbRevF) {
+        uint clkoffset = pio_add_program(pio, &pwm_push_pull_program);
+        pwm_push_pull_program_init(pio, sm_slotclk, clkoffset, CLOCK_PIN);
+    } else {
+        uint clkoffset = pio_add_program(pio, &pwm_low_hiz_program);
+        pwm_low_hiz_program_init(pio, sm_slotclk, clkoffset, CLOCK_PIN);
+    }
 
 //    SlotPowerON();
 
@@ -2140,10 +2147,6 @@ int main(void)
 
 void cdc_task(void)
 {
-    static size_t len = 0;                            // 送信予定長
-    static bool outoutMode = false;                   // 出力中フラグ
-    static size_t offset = 0;                         // 送信オフセット (未使用のまま)
-
 //  if (tud_cdc_connected()){                         // CDC 接続されているか
   if (tud_ready()){                         // CDC 接続されているか(DTS無し対策)
 //        printf("tud_ready\n");
@@ -2159,29 +2162,48 @@ void cdc_task(void)
 
     // 送信TASK
     // CDC出力バッファから実際にUSBに出力
-    if ((cdc_q_count > 0) && (cdc_queue[cdc_q_read].valid)) { // キューにデータがあるか
-
-        if (outoutMode==false)
-        { 
-            // Binモード時はLength分送付する
-            if (cdc_queue[cdc_q_read].binLength == 0) len = strlen(cdc_queue[cdc_q_read].buf); // テキスト長
-            else len = cdc_queue[cdc_q_read].binLength; // バイナリ長
-            outoutMode = true;                         // 出力中フラグセット
-            offset = 0;                                // オフセット初期化
+    if (tud_ready() && tud_cdc_n_ready(0)) {
+        int tx_index = -1;
+        size_t tx_offset = 0;
+        size_t tx_remain = 0;
+        mutex_enter_blocking(&cdc_output_mutex);
+        if (!cdc_tx.active && cdc_tx.count > 0 && cdc_tx.queue[cdc_tx.read_index].state == CDC_MSG_READY) {
+            cdc_tx.length = (cdc_tx.queue[cdc_tx.read_index].binLength == 0) ?
+                            strlen(cdc_tx.queue[cdc_tx.read_index].buf) :
+                            cdc_tx.queue[cdc_tx.read_index].binLength;
+            cdc_tx.offset = 0;
+            cdc_tx.active = true;
+            cdc_tx.queue[cdc_tx.read_index].state = CDC_MSG_SENDING;
         }
-        // USB の書き込みバッファに必要量が確保されているか確認
-        if ((outoutMode==true) && (tud_cdc_n_write_available(0) >= (int)len)){ // 十分な空きがあるか
-            tud_cdc_write(&cdc_queue[cdc_q_read].buf[offset], len); // まとめて書き込み
-            tud_cdc_write_flush();                    // フラッシュして送信ブロックへ
-
-            cdc_queue[cdc_q_read].valid = false;      // 送信済みとして無効化
-            cdc_q_read = (cdc_q_read + 1) % CDC_PRINTF_QSIZE; // 次を指す
-            mutex_enter_blocking(&cdc_output_mutex);  // ロック
-            cdc_q_count--;                             // 件数デクリメント
-            mutex_exit(&cdc_output_mutex);  // ロック解除
-            outoutMode = false;                        // 出力終了
+        if (cdc_tx.active) {
+            tx_index = cdc_tx.read_index;
+            tx_offset = cdc_tx.offset;
+            tx_remain = cdc_tx.length - cdc_tx.offset;
         }
+        mutex_exit(&cdc_output_mutex);
 
+        if (tx_index >= 0) {
+            uint32_t available = tud_cdc_n_write_available(0);
+            uint32_t write_len = (available < tx_remain) ? available : (uint32_t)tx_remain;
+            uint32_t written = 0;
+            if (write_len > 0) written = tud_cdc_write(&cdc_tx.queue[tx_index].buf[tx_offset], write_len);
+
+            mutex_enter_blocking(&cdc_output_mutex);
+            if (cdc_tx.active && cdc_tx.read_index == tx_index &&
+                cdc_tx.queue[tx_index].state == CDC_MSG_SENDING) {
+                cdc_tx.offset += written;
+            }
+            if (cdc_tx.active && cdc_tx.offset == cdc_tx.length) {
+                tud_cdc_write_flush();               // キュー1件の末尾でのみflush
+                cdc_tx.queue[cdc_tx.read_index].state = CDC_MSG_FREE;
+                cdc_tx.read_index = (cdc_tx.read_index + 1) % CDC_PRINTF_QSIZE;
+                cdc_tx.count--;
+                cdc_tx.active = false;
+                cdc_tx.length = 0;
+                cdc_tx.offset = 0;
+            }
+            mutex_exit(&cdc_output_mutex);
+        }
     }
 
 }
@@ -2190,16 +2212,14 @@ void cdc_task(void)
 
 void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
-    //CDC interfaseが再設定された場合は一度CDC Queを空にします。
-   
     printf("Set CDC Parameter...\n");
     displayFlag = true;
-    cdc_queue[cdc_q_read].valid = false;
-    cdc_q_write = 0;          // 書き込みインデックス // produce index
-    cdc_q_read  = 0;          // 読み出しインデックス // consume index
-    cdc_q_count = 0;          // キュー内件数 // 同期注意
     crlfFlag = false;         // CR/LF 判定フラグ (BRCV 用)
 
+}
+
+void tud_umount_cb(void) {
+    cdc_queue_reset();        // USB切断時は未送信データと送信中状態を破棄
 }
 
 void tud_cdc_send_break_cb(uint8_t itf, uint16_t wValue) {
@@ -2207,10 +2227,7 @@ void tud_cdc_send_break_cb(uint8_t itf, uint16_t wValue) {
     //Break信号が来た場合はCDC Queを空にします。
     printf("Breaked CDC...\n");
     displayFlag = true;
-    cdc_queue[cdc_q_read].valid = false;
-    cdc_q_write = 0;          // 書き込みインデックス // produce index
-    cdc_q_read  = 0;          // 読み出しインデックス // consume index
-    cdc_q_count = 0;          // キュー内件数 // 同期注意
+    cdc_queue_reset();
 
 }
 
@@ -2221,32 +2238,27 @@ void tud_cdc_rx_cb(uint8_t itf)
     static int length;                                // BRCV 残り長
     static bool bcvCmd = false;                       // BRCV 受信モードフラグ
     static bool bcvFail = false;                      // BRCV チェック失敗フラグ
-    static bool skipByte = false;                     // CRLF 対策で先頭バイトをスキップするか
+    static char pendingLineEnd = 0;                   // BRCV直後に残る2文字目の改行コード
     uint32_t len = tud_cdc_read(rx_buf, RX_BUF_SIZE-1); // CDC からデータ読み出し
     char c;
 
     for (uint32_t i = 0; i < len; ++i) {
 
         if (bcvCmd == true){
-            char c = rx_buf[i]; 
-            if (skipByte == true){
-                skipByte = false;                      // スキップフラグクリア
-#ifdef BIN_DEBUG
-            if (comdbgFlag)
-                printf("SKIP : %02x \n", (unsigned char)c); // デバッグ表示
-#endif
-                continue;                              // スキップ時は書き込みしないで次へ
+            if (pendingLineEnd != 0) {
+                char expected = pendingLineEnd;
+                pendingLineEnd = 0;
+                if (rx_buf[i] == (uint8_t)expected) continue;
             }
-
-            slotMem[startAddress++] = (uint8_t)c;      // BRCV モード: 生バイトを slotMem に格納
-            length--;                                  // 残り長デクリメント
-#ifdef BIN_DEBUG
-//            printf("MEM:%04x %02x\n",startAddress, (unsigned char)c);       // デバッグ表示
-//            printf("%02x-%d \n", (unsigned char)c,length);       // デバッグ表示
-#endif
-            commandBufs[write_idx].arg_val[1] = length; // キュー上のコマンドに残長を反映
+            uint32_t copy_len = len - i;
+            if (copy_len > (uint32_t)length) copy_len = (uint32_t)length;
+            memcpy(&slotMem[startAddress], &rx_buf[i], copy_len);
+            startAddress += copy_len;
+            length -= copy_len;
+            i += copy_len - 1;
             if (length==0){
                 mutex_enter_blocking(&cmdcount_mutex);
+                commandBufs[write_idx].arg_val[1] = 0;
                 commandBufs[write_idx].valid = true;   // 受信完了 => コマンドを有効化
                 write_idx = (write_idx + 1) % CMD_BUF_NUM; // 次の書き込み位置へ
                 count++;                                // キュー件数インクリメント
@@ -2267,7 +2279,7 @@ void tud_cdc_rx_cb(uint8_t itf)
 #endif
  
             // 改行トリガー
-            if (c == '\n' || c == '\r') {
+            if ((uint8_t)c == ASCII_LF || (uint8_t)c == ASCII_CR) {
                 
                 if (lineLen == 0) crlfFlag = true;      // このFlagが立つ場合は改行は2Byte (CRLF 対策)
 
@@ -2334,7 +2346,13 @@ void tud_cdc_rx_cb(uint8_t itf)
                             if (startAddress + length >= DATABUF_SIZE)  bcvFail = true; // 合算で範囲チェック
                             if (bcvFail == false) {
                                 bcvCmd = true;                   // BRCV 受信モードに移行
-                                if (crlfFlag== true) skipByte = true;       // LFCR 対策: 余分な改行バイトをスキップ
+                                uint8_t opposite = ((uint8_t)c == ASCII_CR) ? ASCII_LF : ASCII_CR;
+                                if (((i + 1) < len) && (rx_buf[i + 1] == opposite)) {
+                                    i++;                         // 同一受信内のCRLF/LFCRを即時除外
+                                    crlfFlag = true;
+                                } else if (crlfFlag) {
+                                    pendingLineEnd = opposite;   // 受信境界をまたぐ2文字目だけ保留
+                                }
                             } 
                         }else{
                             bcvCmd = false;                     // BRCV 以外は通常キュー登録

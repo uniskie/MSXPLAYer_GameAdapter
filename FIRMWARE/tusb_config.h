@@ -30,6 +30,8 @@
 #define CFG_TUD_CDC_RX_BUFSIZE  (4096)
 #define CFG_TUD_CDC_TX_BUFSIZE  (4096)
 #define CFG_TUD_CDC_EP_BUFSIZE  (64)
+// DTRを使用しないホストでも未送信データを上書きしない
+#define CFG_TUD_CDC_TX_OVERWRITABLE_IF_NOT_CONNECTED (0)
 
 //#define CFG_TUD_CDC_RX_BUFSIZE  (4096)
 //#define CFG_TUD_CDC_TX_BUFSIZE  (4096)

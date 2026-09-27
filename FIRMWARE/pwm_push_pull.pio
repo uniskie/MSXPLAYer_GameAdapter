@@ -1,0 +1,28 @@
+.program pwm_push_pull
+.wrap_target
+    set pins, 0      ; GPIO出力をLOW
+    set pindirs, 1   ; GPIO方向を出力に固定
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    set pins, 1      ; GPIO出力をHIGH
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+.wrap
+
+% c-sdk {
+static inline void pwm_push_pull_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_sm_config c = pwm_push_pull_program_get_default_config(offset);
+    sm_config_set_set_pins(&c, pin, 1);
+    sm_config_set_clkdiv(&c, 2.7947f);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+}
+%}

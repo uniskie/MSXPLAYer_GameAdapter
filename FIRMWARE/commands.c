@@ -73,6 +73,8 @@ extern int cmd_slotReadTransferWithHash(const Command_t* cmd);         // main.c
 extern int cmd_hset(const Command_t* cmd);         // main.c 実装
 extern int cmd_romMapperSet(const Command_t* cmd);         // main.c 実装
 extern int cmd_romMapperRead(const Command_t* cmd);         // main.c 実装
+extern int cmd_slotM1Read(const Command_t* cmd);         // main.c 実装
+extern int cmd_slotM1Dump(const Command_t* cmd);         // main.c 実装
 
 const CommandTableEntry cmd_table[] = {
     {"HSET", cmd_hset},		            // HSET,[Address],[Data]		                                Hardware Setting,
@@ -109,7 +111,9 @@ const CommandTableEntry cmd_table[] = {
     {"SDBGON", cmd_setdebuglog},	    // SDBGON                   	                                シリアルのデバッグ出力を有効にする
     {"SMTH", cmd_slotReadTransferWithHash},	    // SMTH,[Address],[Buffer Address],[Length](,[Slot])    (追加 V1.20～) 当該エリアをReadしてHash値を計算し返します
     {"RMSET", cmd_romMapperSet},	    // RMSET,[Mapper Selecter Address],[Bank Address],[Bank size]   (追加 V1.40～) Mega ROM Mapperの設定
-    {"RMRD", cmd_romMapperRead}	        // RMRD,[Mapper Start],[Mapper End](,[Slot])                    (追加 V1.40～) Mega ROMの一括Read
+    {"RMRD", cmd_romMapperRead},	        // RMRD,[Mapper Start],[Mapper End](,[Slot])                    (追加 V1.40～) Mega ROMの一括Read
+    {"SMMR", cmd_slotM1Read},	        // SMMR,[Mapper Start],[Mapper End](,[Slot])                    (追加 V1.40～) Mega ROMの一括Read
+    {"MDMP", cmd_slotM1Dump}	        // SMMR,[Mapper Start],[Mapper End](,[Slot])                    (追加 V1.40～) Mega ROMの一括Read
 };
 
 const size_t cmd_table_size = sizeof(cmd_table) / sizeof(CommandTableEntry); // テーブルサイズ計算

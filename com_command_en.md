@@ -6,7 +6,7 @@
 - Format (maximum 4 arguments):
 
   ```CMD
-  CMD[,ARG1[,ARG2[,ARG3[,ARG4]]]]<CR|LF|CRLF>
+  CMD[,ARG1[,ARG2[,ARG3[,ARG4]]]]<CR|LF|CRLF|LFCR>
   ```
 
 - Command names are case-insensitive (converted to uppercase internally)
@@ -114,23 +114,23 @@
 - **Notes**:
   - Immediately after `BRCV` is executed, the device enters binary receive mode.
   - Out-of-range conditions such as `BufferAddress + Length` exceeding 64KB result in `FAIL`.
+  - `CR`, `LF`, `CRLF`, and `LFCR` can be used as command terminators.
 
 ---
 
 ### 7) HVER - Hardware Version
 
-- **Function**: Displays the hardware name, revision, and build date.
+- **Function**: Displays the hardware name, PCB revision, and firmware version.
 - **Format**: `HVER`
 - **Arguments**: None
 - **Response**:
-  - `HW_NAME`
-  - `HW_VERSION`
-  - `FIRMWARE DATE`
+  - `HARDWARE NAME : <Hardware Name>`
+  - `HARDWARE VER : <REV_B2|REV_F|UNKNOWN>`
+  - `FIRMWARE VER : <Firmware Version>`
   - `OK`
 - **Notes**:
-  - `HW_NAME`: Card reader name
-  - `HW_VERSION`: Hardware version
-  - `FIRMWARE DATE`: Firmware release date
+  - PCB REV_B2/REV_F is detected automatically at startup.
+  - `UNKNOWN` is displayed if the PCB revision cannot be detected.
   - The output format was changed in 260531 (V1.40).
 
 ---
@@ -474,6 +474,29 @@
   - `Bank Capacity` : 00〜FF Number of banks to read
   - `Slot` : 1 or 2 (uses `defaultSlot` if omitted)
 - **Response**: Read Data + `OK/FAIL`
+
+---
+
+### 34) SMMR - Slot M1 Read
+
+- **Function**: Reads one byte from slot memory using an M1 cycle.
+- **Format**: `SMMR,[Address](,[Slot])`
+- **Arguments**:
+  - `Address`: 0000 to FFFF read address
+  - `Slot`: 1 or 2 (uses `defaultSlot` if omitted)
+- **Response**: `<Address> : <Data>` + `OK/FAIL`
+
+---
+
+### 35) MDMP - Slot M1 Dump
+
+- **Function**: Reads slot memory using M1 cycles and displays it in hexadecimal and ASCII format.
+- **Format**: `MDMP,[Address](,[Length],[Slot])`
+- **Arguments**:
+  - `Address`: 0000 to FFFF start address (0000 if omitted)
+  - `Length`: Number of bytes to display (0080 if omitted)
+  - `Slot`: 1 or 2 (uses `defaultSlot` if omitted)
+- **Response**: 16-byte hexadecimal/ASCII dump + `OK/FAIL`
 
 ---
 

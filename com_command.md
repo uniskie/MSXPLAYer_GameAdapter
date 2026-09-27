@@ -6,7 +6,7 @@
 - フォーマット（最大4引数）:
 
   ```CMD
-  CMD[,ARG1[,ARG2[,ARG3[,ARG4]]]]<CR|LF|CRLF>
+  CMD[,ARG1[,ARG2[,ARG3[,ARG4]]]]<CR|LF|CRLF|LFCR>
   ```
 
 - コマンド名は大文字小文字を区別しません（内部で大文字化）
@@ -114,23 +114,23 @@
 - **備考**:
   - `BRCV` 実行後直後はバイナリ受信モードへ移行します
   - 範囲外（`BufferAddress + Length` が64KB超）などは `FAIL`
+  - コマンド終端には `CR` / `LF` / `CRLF` / `LFCR` を使用できます。
 
 ---
 
 ### 7) HVER - Hardware Version
 
-- **機能**: ハード名・リビジョン・ビルド日を表示
+- **機能**: ハードウェア名、PCBリビジョン、ファームウェアバージョンを表示
 - **書式**: `HVER`
 - **引数**: なし
 - **応答**:
-  - `HW_NAME`
-  - `HW_VERSION`
-  - `FIRMWARE DATE`
+  - `HARDWARE NAME : <Hardware Name>`
+  - `HARDWARE VER : <REV_B2|REV_F|UNKNOWN>`
+  - `FIRMWARE VER : <Firmware Version>`
   - `OK`
 - **備考**:
-  - `HW_NAME`：カードリーダの名称
-  - `HW_VERSION`：HWのVersion
-  - `FIRMWARE DATE`:FWのリリース日
+  - PCB REV_B2/REV_Fは起動時に自動判別します。
+  - 判定できない場合は`UNKNOWN`を表示します。
   ※ 260531(V1.40)で出力フォーマットが変更になっています。  
 
 ---
@@ -474,6 +474,29 @@
   - `Bank Capacity` :  00〜FF　読み込むBANK数を指定します  
   - `Slot` : 1 or 2（省略時defaultSlot）
 - **応答**: Read Data + `OK/FAIL`
+
+---
+
+### 34) SMMR - Slot M1 Read
+
+- **機能**: M1サイクルを使用してスロットメモリから1バイト読み出す
+- **書式**: `SMMR,[Address](,[Slot])`
+- **引数**:
+  - `Address` : 0000〜FFFF 読み出しアドレス
+  - `Slot` : 1 または 2（省略時はdefaultSlot）
+- **応答**: `<Address> : <Data>` + `OK/FAIL`
+
+---
+
+### 35) MDMP - Slot M1 Dump
+
+- **機能**: M1サイクルを使用してスロットメモリを読み出し、HEXおよびASCII形式で表示する
+- **書式**: `MDMP,[Address](,[Length],[Slot])`
+- **引数**:
+  - `Address` : 0000〜FFFF 読み出し開始アドレス（省略時0000）
+  - `Length` : 表示バイト数（省略時0080）
+  - `Slot` : 1 または 2（省略時はdefaultSlot）
+- **応答**: 16バイト単位のHEX/ASCIIダンプ + `OK/FAIL`
 
 ---
 
